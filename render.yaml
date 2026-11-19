@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: pin-pitch-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRE_MINUTES
+        value: "60"
+      - key: TELEPHONY_PROVIDER
+        value: mock
