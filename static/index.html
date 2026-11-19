@@ -27,6 +27,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:18p
 
 .auth-gate{position:fixed;inset:0;background:#f7f7f5;z-index:50;display:flex;align-items:center;justify-content:center;padding:24px}.auth-panel{width:100%;max-width:420px;background:#fff;border:1px solid #ececf0;border-radius:22px;padding:24px;box-shadow:var(--shadow)}.auth-panel h1{font-size:26px;letter-spacing:-1px;margin:8px 0}.auth-panel p{font-size:13px;color:var(--muted);line-height:1.5}.auth-panel input{width:100%;border:1px solid #e6e5eb;border-radius:11px;padding:13px;margin:7px 0 12px}.auth-panel .primary{width:100%;padding:13px}.auth-switch{border:0;background:none;color:#7666e8;font-size:12px;font-weight:700;margin-top:14px;width:100%}.demo-tag{display:inline-block;background:#fff2d8;color:#805b10;border-radius:20px;padding:5px 9px;font-size:10px;font-weight:800;letter-spacing:.4px}
 </style></head>
+
 <body>
 <div id="authGate" class="auth-gate"><div class="auth-panel"><div class="brand">PIN<span>&</span>PITCH</div><span class="demo-tag">DEMO ENVIRONMENT</span><h1 id="authTitle">Welcome back</h1><p>Sign in or create a demo workspace to manage your AI agents and simulated calls.</p><input id="authEmail" type="email" autocomplete="email" placeholder="Email address"><input id="authPassword" type="password" autocomplete="current-password" placeholder="Password (10+ characters)"><button class="primary" onclick="authSubmit()" id="authSubmit">Sign in</button><button class="auth-switch" onclick="toggleAuth()" id="authSwitch">New to PIN&PITCH? Create an account</button><p id="authError" style="color:#b33;min-height:16px"></p><p style="font-size:10px">Demo only. Use a test email and password, not a password you use elsewhere.</p></div></div>
 <div class="app">
@@ -78,4 +79,6 @@ createAgent=async function(){let n=document.getElementById('agentName').value.tr
 // Gate the app until a demo workspace session exists.
 if(accessToken){api('/me').then(()=>{document.getElementById('authGate').style.display='none';connectEvents();refreshAgents();refreshCalls()}).catch(()=>{accessToken='';localStorage.removeItem('pp_token')})}
 
-</script></body></html>
+</script>
+<script src="./talk-to-agent.js"></script>
+</body></html>
