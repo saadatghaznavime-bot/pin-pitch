@@ -93,6 +93,7 @@
     recognition.onresult = event => {
       const transcript = event.results?.[0]?.[0]?.transcript || "";
       answer(transcript);
+      listening = false;
     };
     recognition.onerror = event => {
       state("Voice input issue");
@@ -101,12 +102,7 @@
     };
     recognition.onend = () => {
       recognition = null;
-      if (listening) {
-        setTimeout(() => {
-          if (!listening) return;
-          try { startRecognitionAgain(); } catch { stop(); }
-        }, 700);
-      }
+      if (listening) { listening = false; $("talkStart").disabled = false; $("talkStop").disabled = true; state("Ready · Tap to speak again"); }
     };
     try { recognition.start(); } catch (e) { log("System", e.message); stop(); }
   }
