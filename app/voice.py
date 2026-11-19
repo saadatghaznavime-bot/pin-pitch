@@ -40,8 +40,6 @@ async def create_browser_voice_session(
     ).first()
     if not agent:
         raise HTTPException(404, "Agent not found in this workspace.")
-    if not agent.enabled:
-        raise HTTPException(400, "Publish this agent before starting a live voice session.")
     voice = agent.voice if agent.voice in {
         "alloy","ash","ballad","coral","echo","sage","shimmer","verse","marin","cedar"
     } else "marin"
