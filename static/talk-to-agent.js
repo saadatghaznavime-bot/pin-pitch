@@ -37,9 +37,9 @@
     try {
       const agents = await api("/agents");
       $("talkAgent").innerHTML = agents.map(a =>
-        `<option value="${a.id}" ${!a.enabled ? "disabled" : ""}>${escapeHtml(a.name)}${a.enabled ? "" : " (publish first)"}</option>`
+        `<option value="${a.id}" >${escapeHtml(a.name)}${a.enabled ? "" : " (draft)"}</option>`
       ).join("") || '<option value="">Create an agent first</option>';
-      $("talkStart").disabled = !agents.some(a => a.enabled);
+      $("talkStart").disabled = agents.length === 0;
     } catch (e) { state(e.message); }
   }
   async function start() {
@@ -47,7 +47,7 @@
     $("talkStart").disabled = true; state("Connecting…");
     try {
       const agentId = Number($("talkAgent").value);
-      if (!agentId) throw new Error("Choose a published agent.");
+      if (!agentId) throw new Error("Choose an agent first.");
       mic = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
       pc = new RTCPeerConnection();
       remoteAudio = document.createElement("audio"); remoteAudio.autoplay = true; remoteAudio.playsInline = true;
