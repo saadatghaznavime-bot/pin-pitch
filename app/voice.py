@@ -72,9 +72,9 @@ async def create_browser_voice_session(
                         str(claims["sub"]).encode()
                     ).hexdigest()
                 },
-                data={
-                    "sdp": sdp,
-                    "session": json.dumps(session)
+                files={
+                    "sdp": (None, sdp, "application/sdp"),
+                    "session": (None, json.dumps(session), "application/json")
                 }
             )
         if response.status_code >= 400:
