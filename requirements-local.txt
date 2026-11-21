@@ -1,0 +1,4 @@
+# Optional local-only AI components. Do not add these to Render requirements.
+faster-whisper>=1.1
+python-multipart>=0.0.9
+piper-tts>=1.2
