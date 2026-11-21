@@ -8,7 +8,10 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import secrets
 import subprocess
+import time
+from collections import defaultdict, deque
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -17,7 +20,7 @@ import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -30,7 +33,7 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 
-app = FastAPI(title="PIN&PITCH Local AI Gateway", version="1.0.0")
+app = FastAPI(title="PIN&PITCH Local AI Gateway", version="1.1.0", docs_url=None, redoc_url=None, openapi_url=None)
 allowed_origins = [
     item.strip()
     for item in os.getenv(
@@ -44,13 +47,35 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 _whisper_model = None
 _whisper_device_actual: Optional[str] = None
 _whisper_compute_actual: Optional[str] = None
+API_TOKEN = os.getenv("LOCAL_AI_API_TOKEN", "").strip()
+_RATE_BUCKETS: dict[str, deque] = defaultdict(deque)
 
+async def _security_guard(request: Request, authorization: Optional[str] = Header(default=None)):
+    host = (request.headers.get("host") or "").split(":")[0].strip("[]").lower()
+    if host not in {"127.0.0.1", "localhost"}:
+        raise HTTPException(403, "Local AI gateway accepts localhost connections only.")
+    origin = request.headers.get("origin")
+    if origin and origin not in allowed_origins:
+        raise HTTPException(403, "This website is not allowed to access the local AI gateway.")
+    if not API_TOKEN or len(API_TOKEN) < 32:
+        raise HTTPException(503, "Local gateway is locked: configure a random LOCAL_AI_API_TOKEN of at least 32 characters.")
+    if not authorization or not secrets.compare_digest(authorization, "Bearer " + API_TOKEN):
+        raise HTTPException(401, "Local AI gateway token is missing or invalid.")
+    now = time.monotonic()
+    key = request.client.host if request.client else "unknown"
+    bucket = _RATE_BUCKETS[key]
+    while bucket and now - bucket[0] > 60.0:
+        bucket.popleft()
+    limit = 12 if request.url.path == "/transcribe" else 60
+    if len(bucket) >= limit:
+        raise HTTPException(429, "Local gateway rate limit reached. Please wait a moment.")
+    bucket.append(now)
 
 def _public_answer(raw: str) -> str:
     """Remove Qwen/Ollama reasoning blocks before text reaches the UI or TTS."""
@@ -95,7 +120,7 @@ async def _ollama_status() -> dict:
         return {"reachable": False, "model": OLLAMA_MODEL, "model_available": False, "error": type(exc).__name__}
 
 
-@app.get("/health")
+@app.get("/health", dependencies=[Depends(_security_guard)])
 async def health():
     ollama = await _ollama_status()
     return {
@@ -109,7 +134,7 @@ async def health():
     }
 
 
-@app.post("/chat")
+@app.post("/chat", dependencies=[Depends(_security_guard)])
 async def chat(data: ChatIn):
     ollama = await _ollama_status()
     if not ollama["reachable"] or not ollama["model_available"]:
@@ -170,7 +195,7 @@ def _transcribe_file(model, file_path: str):
     return transcript, getattr(info, "language", None)
 
 
-@app.post("/transcribe")
+@app.post("/transcribe", dependencies=[Depends(_security_guard)])
 async def transcribe(audio: UploadFile = File(...)):
     raw = await audio.read(MAX_AUDIO_BYTES + 1)
     if not raw or len(raw) > MAX_AUDIO_BYTES:
@@ -196,7 +221,7 @@ async def transcribe(audio: UploadFile = File(...)):
                 pass
 
 
-@app.post("/speak")
+@app.post("/speak", dependencies=[Depends(_security_guard)])
 async def speak(payload: dict):
     text = str(payload.get("text", "")).strip()
     if not text or len(text) > 4000:
