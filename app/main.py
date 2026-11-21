@@ -155,11 +155,11 @@ async def inbox_reply(conversation_id:int, payload:dict, claims=Depends(current_
     if not conv: raise HTTPException(404,"Conversation not found")
     body=str(payload.get("body","")).strip()
     if not body or len(body)>10000: raise HTTPException(400,"Message must be 1–10000 characters")
-    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=body,delivery_status="pending_provider")
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=body,delivery_status="saved_demo_only")
     conv.last_message=body; conv.updated_at=datetime.now(timezone.utc)
     db.add(msg); db.commit(); db.refresh(msg)
     await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
-    return {"id":msg.id,"delivery_status":"pending_provider","note":"Saved in PIN&PITCH. A channel provider must be connected before this can be delivered externally."}
+    return {"id":msg.id,"delivery_status":"saved_demo_only","external_delivery":False,"note":"Saved in the PIN&PITCH demo inbox only. No external message was sent."}
 
 @app.post("/inbox/demo/inbound")
 async def inbox_demo_inbound(payload:dict, claims=Depends(current_claims), db:Session=Depends(get_db)):
@@ -428,8 +428,6 @@ def analytics(claims=Depends(current_claims),db:Session=Depends(get_db)):
     conversations=db.query(Conversation).filter_by(workspace_id=workspace).count()
     messages=db.query(Message).filter_by(workspace_id=workspace).count()
     sessions=db.query(AgentSession).filter_by(workspace_id=workspace).count()
-    seven_days_ago=datetime.now(timezone.utc).replace(tzinfo=None)-__import__("datetime").timedelta(days=7)
-    recent_calls=db.query(Call).filter(Call.workspace_id==workspace,Call.id>0).count()
     upcoming=db.query(Appointment).filter(Appointment.workspace_id==workspace,Appointment.status=="scheduled",Appointment.scheduled_at>=datetime.now(timezone.utc).replace(tzinfo=None)).count()
     return {"period":"all_time","calls":calls,"contacts":contacts,"appointments":appointments,"upcoming_appointments":upcoming,"conversations":conversations,"messages":messages,"agent_sessions":sessions,"lead_statuses":{status:db.query(Contact).filter_by(workspace_id=workspace,lead_status=status).count() for status in sorted(LEAD_STATUSES)},"demo_only":True}
 
