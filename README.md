@@ -1,67 +1,113 @@
-# PIN&PITCH connected demo (PWA + API)
+# PIN&PITCH — zero-cost communications demo
 
-This package combines the mobile-first PIN&PITCH PWA with its FastAPI demo backend. The PWA now uses the backend for registration/login, workspace-scoped agent creation/listing, simulated inbound/outbound call records, call history, and WebSocket call events.
+PIN&PITCH is a workspace-scoped communications demo. It includes account/workspace authentication, AI agent setup, fictional browser call simulations, a unified demo inbox, approved business FAQs, and a mobile-first PWA.
 
-## Run locally
-Python 3.11+ required.
+## Zero-cost and traffic boundaries
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+- The hosted application works without a local AI server.
+- Simulated calls, conversations and replies are PIN&PITCH database records. They do not place calls or deliver messages.
+- Outbound SMS, WhatsApp, social messaging, OpenAI Realtime and paid voice providers are disabled in the demo backend.
+- Inbox replies are saved with the status `saved_demo_only`; they are not sent externally.
+- Optional local AI runs on the Windows PC using Ollama, faster-whisper and Piper. It does not require paid API keys.
+- Do not enter real customer data, payment details or sensitive information in this demo.
+
+## Run the web application locally
+
+Python 3.11+ is recommended.
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-cp .env.example .env
-```
-Set JWT_SECRET in .env to a long random secret, then run:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-Open http://127.0.0.1:8000 (API docs at /docs). The PWA and API share one origin, so no API URL configuration is needed.
-
-## iPhone access
-Deploy this whole backend to a Python-capable host with HTTPS, then open its HTTPS URL in Safari and choose Share → Add to Home Screen. A static-only host such as a basic file drop cannot run this backend.
-
-## Demo limitations
-All calls are MOCK only. No actual phone calls, live voice audio, OpenAI Live session, carrier connection, SMS, or company APIs are connected. Call numbers and transcript content are demo data. Do not use real customer data. Use a test-only email/password.
-
-Before public deployment: use PostgreSQL, HTTPS/WSS, rate limiting, email verification, password reset, secure secret management, audit logs, CORS policy, tenant-isolation tests, provider webhook signature verification, and outbound consent/calling-hours safeguards.
-
-
-## Deploy on Render (phone-friendly, requires a Render account)
-1. Upload this project to a GitHub repository (the repository root must contain `render.yaml`, `requirements.txt`, and `app/`).
-2. In Render, choose **New > Blueprint**, connect that repository, and apply the `render.yaml` blueprint.
-3. Render generates `JWT_SECRET` automatically. The start command uses Render's `$PORT`; do not hardcode port 8000 in hosted environments.
-4. Wait for the deploy to finish, then open the `https://...onrender.com` service URL in Safari.
-5. In Safari, tap Share > Add to Home Screen.
-
-This free demo uses SQLite on the service filesystem; free hosting may not retain data across redeploys/restarts. Use a managed PostgreSQL database and persistent production configuration before real users.
-
-## AI voice replies (ElevenLabs)
-
-PIN&PITCH includes a hybrid text-plus-voice reply workflow:
-- Add approved business FAQs in the Unified Inbox.
-- Only messages matching at least two configured FAQ keywords are eligible for automatic replies.
-- Unmatched messages remain with staff for manual approval.
-- Staff can write an approved response and use **Generate & send text + voice**.
-- WhatsApp Cloud API can deliver text and a voice-note audio attachment when configured. Website chat stores a playable audio attachment. SMS currently sends text only; Instagram, Messenger and TikTok outbound adapters still require platform-specific setup.
-
-Configure these as **private environment variables** in Render (Dashboard → PIN&PITCH service → Environment), or in a local `.env` file. Never put API keys in frontend code or GitHub commits.
-
-```env
-ELEVENLABS_API_KEY=
-ELEVENLABS_VOICE_ID=
-ELEVENLABS_MODEL_ID=eleven_flash_v2_5
-ELEVENLABS_OUTPUT_FORMAT=opus_48000_128
-AI_REPLY_PERMISSION_MODE=hybrid
-PUBLIC_BASE_URL=https://your-pin-pitch-domain
-WHATSAPP_ACCESS_TOKEN=
-WHATSAPP_PHONE_NUMBER_ID=
-META_GRAPH_API_VERSION=v23.0
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_SMS_FROM=
+Copy-Item .env.example .env
 ```
 
-ElevenLabs usage is plan-metered. WhatsApp voice-note delivery requires valid OGG/Opus audio and an approved WhatsApp Cloud API sender. Test with a real recipient before production. This demo stores audio under `static/generated-audio`; ephemeral hosting is not durable. Production should use private object storage, signed media URLs, encrypted per-workspace credentials, retention controls, and webhook signature verification.
+Set a unique `JWT_SECRET` in `.env`, then start the app:
 
-The automatic hybrid path is **approved-FAQ matching**, not unrestricted generative AI. It deliberately avoids inventing business policies, prices, bookings, or availability. Add and verify FAQs before enabling automatic responses.
+```powershell
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Open http://127.0.0.1:8000. API documentation is at http://127.0.0.1:8000/docs. SQLite is created in the project directory by default.
+
+## Optional local AI gateway (Windows)
+
+The local gateway is a separate process. It binds to `127.0.0.1:8765` only. Do not expose it with port forwarding, a public tunnel, or `0.0.0.0`.
+
+### 1. Install Ollama and Qwen3
+
+Install Ollama for Windows from https://ollama.com/download/windows. Then run:
+
+```powershell
+ollama --version
+ollama pull qwen3:4b
+ollama run qwen3:4b
+```
+
+Exit the model prompt with `/bye`. Ollama should remain running in the background.
+
+### 2. Install optional local speech packages
+
+In the activated project environment:
+
+```powershell
+pip install -r requirements-local.txt
+```
+
+This installs faster-whisper, Piper TTS and multipart upload support. Download a Piper voice model from the official voice repository and note the full path to its `.onnx` file. Check the model's licence before redistribution.
+
+### 3. Start the local gateway
+
+```powershell
+$env:OLLAMA_URL = "http://127.0.0.1:11434"
+$env:OLLAMA_MODEL = "qwen3:4b"
+$env:WHISPER_MODEL = "small"
+$env:WHISPER_DEVICE = "cpu"
+$env:WHISPER_COMPUTE_TYPE = "int8"
+$env:PIPER_MODEL = "C:\full\path\to\your\voice.onnx"
+$env:LOCAL_AI_ALLOWED_ORIGINS = "http://127.0.0.1:8000,http://localhost:8000"
+python -m app.local_gateway
+```
+
+The gateway health endpoint is http://127.0.0.1:8765/health.
+
+Available endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Ollama, model, speech and NVIDIA GPU diagnostics |
+| `POST /chat` | Local Qwen chat via Ollama |
+| `POST /transcribe` | Local faster-whisper transcription |
+| `POST /speak` | Local Piper WAV generation |
+
+The first Whisper transcription downloads the selected model. Start with CPU transcription to avoid CUDA setup and GPU memory contention. For GPU transcription on Windows, faster-whisper requires compatible CUDA 12 cuBLAS and cuDNN 9 runtime libraries. If CUDA initialization fails, configure `WHISPER_DEVICE=cpu`. The gateway reports its actual Whisper device after initialization.
+
+The handover PC has an NVIDIA GeForce RTX 4050 Laptop GPU with approximately 6 GiB VRAM and 64 GiB system RAM. Qwen3 4B is the initial local model target; verify actual GPU offload and VRAM use with `nvidia-smi`. Whisper is deliberately configured for CPU by default so it does not compete with Ollama for the limited GPU memory.
+
+### Browser access notes
+
+For the first local test, open the web app at `http://127.0.0.1:8000` on the same PC as the gateway. The default CORS allowlist permits that local origin. A Render-hosted HTTPS page calling a local HTTP gateway may be blocked by browser local-network/private-network security controls even if CORS is configured. Hosted-to-local access is not guaranteed; the hosted application remains usable without it.
+
+## Deploy the hosted demo on Render
+
+Connect this repository to Render and apply the existing `render.yaml` Blueprint. The hosted service installs only `requirements.txt`; local speech dependencies are isolated in `requirements-local.txt` and are not installed on Render.
+
+The free Render service uses SQLite on its filesystem, which may reset after restarts or redeploys. Treat this as a demonstration environment, not durable customer storage.
+
+## Tests
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+If `requirements-dev.txt` is not present in the current branch yet, install pytest separately with `pip install pytest`.
+
+## Current limitations
+
+- The optional local AI gateway is implemented separately from the hosted API. The current hosted frontend does not yet automatically route all agent chat and browser microphone workflows through it.
+- Ollama, the Qwen model, faster-whisper, Piper and a licensed Piper voice must be installed and verified on the Windows PC.
+- Local browser-to-gateway integration must be tested in the target browser; hosted HTTPS pages may be restricted from accessing loopback HTTP services.
+- Calls and messages are simulations only. No carrier, SMS, WhatsApp, social platform, external calendar or production telephony provider is connected.
+- SQLite is suitable for this demo, not multi-instance production.
