@@ -35,3 +35,33 @@ Before public deployment: use PostgreSQL, HTTPS/WSS, rate limiting, email verifi
 5. In Safari, tap Share > Add to Home Screen.
 
 This free demo uses SQLite on the service filesystem; free hosting may not retain data across redeploys/restarts. Use a managed PostgreSQL database and persistent production configuration before real users.
+
+## AI voice replies (ElevenLabs)
+
+PIN&PITCH includes a hybrid text-plus-voice reply workflow:
+- Add approved business FAQs in the Unified Inbox.
+- Only messages matching at least two configured FAQ keywords are eligible for automatic replies.
+- Unmatched messages remain with staff for manual approval.
+- Staff can write an approved response and use **Generate & send text + voice**.
+- WhatsApp Cloud API can deliver text and a voice-note audio attachment when configured. Website chat stores a playable audio attachment. SMS currently sends text only; Instagram, Messenger and TikTok outbound adapters still require platform-specific setup.
+
+Configure these as **private environment variables** in Render (Dashboard → PIN&PITCH service → Environment), or in a local `.env` file. Never put API keys in frontend code or GitHub commits.
+
+```env
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=
+ELEVENLABS_MODEL_ID=eleven_flash_v2_5
+ELEVENLABS_OUTPUT_FORMAT=opus_48000_128
+AI_REPLY_PERMISSION_MODE=hybrid
+PUBLIC_BASE_URL=https://your-pin-pitch-domain
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+META_GRAPH_API_VERSION=v23.0
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_SMS_FROM=
+```
+
+ElevenLabs usage is plan-metered. WhatsApp voice-note delivery requires valid OGG/Opus audio and an approved WhatsApp Cloud API sender. Test with a real recipient before production. This demo stores audio under `static/generated-audio`; ephemeral hosting is not durable. Production should use private object storage, signed media URLs, encrypted per-workspace credentials, retention controls, and webhook signature verification.
+
+The automatic hybrid path is **approved-FAQ matching**, not unrestricted generative AI. It deliberately avoids inventing business policies, prices, bookings, or availability. Add and verify FAQs before enabling automatic responses.
