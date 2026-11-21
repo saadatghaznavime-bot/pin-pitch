@@ -106,7 +106,7 @@ If `requirements-dev.txt` is not present in the current branch yet, install pyte
 
 ## Current limitations
 
-- The optional local AI gateway is implemented separately from the hosted API. The current hosted frontend does not yet automatically route all agent chat and browser microphone workflows through it.
+- The agent conversation panel can use the local Ollama gateway for chat, faster-whisper for recorded browser microphone transcription, and Piper for speech output when each local component is installed. If the gateway or model is unavailable, the hosted backend stores an approved-FAQ answer or a clearly labeled safe fallback.
 - Ollama, the Qwen model, faster-whisper, Piper and a licensed Piper voice must be installed and verified on the Windows PC.
 - Local browser-to-gateway integration must be tested in the target browser; hosted HTTPS pages may be restricted from accessing loopback HTTP services.
 - Calls and messages are simulations only. No carrier, SMS, WhatsApp, social platform, external calendar or production telephony provider is connected.
