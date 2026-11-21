@@ -401,13 +401,18 @@ async def add_agent_session_turn(session_id:int,payload:dict,claims=Depends(curr
     if not message or len(message)>8000: raise HTTPException(400,"Message must contain 1–8000 characters.")
     agent=db.query(Agent).filter_by(id=session.agent_id,workspace_id=claims["workspace"]).first()
     user_turn=AgentSessionTurn(workspace_id=claims["workspace"],session_id=session.id,role="user",content=message)
-    faq=find_faq_reply(claims["workspace"],message,db)
-    if faq:
-        answer=faq.answer
-        mode="approved_faq"
+    supplied_answer=payload.get("assistant_reply")
+    if isinstance(supplied_answer,str) and supplied_answer.strip():
+        answer=supplied_answer.strip()[:8000]
+        mode="local_ollama"
     else:
-        answer="I don't have a verified answer for that yet. I can take your details and have a team member follow up. What is the best name and contact number to reach you?"
-        mode="safe_fallback"
+        faq=find_faq_reply(claims["workspace"],message,db)
+        if faq:
+            answer=faq.answer
+            mode="approved_faq"
+        else:
+            answer="I don't have a verified answer for that yet. I can take your details and have a team member follow up. What is the best name and contact number to reach you?"
+            mode="safe_fallback"
     assistant_turn=AgentSessionTurn(workspace_id=claims["workspace"],session_id=session.id,role="assistant",content=answer)
     if session.title=="New conversation":
         session.title=message[:160]
