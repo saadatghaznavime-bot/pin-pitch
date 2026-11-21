@@ -27,6 +27,9 @@
   const GATEWAY = "http://127.0.0.1:8765";
   const $ = id => document.getElementById(id);
   const state = value => { $("voiceState").textContent = value; };
+  const gatewayTokenKey = "pinpitch_local_gateway_token";
+  let gatewayToken = sessionStorage.getItem(gatewayTokenKey) || "";
+  const gatewayHeaders = extra => Object.assign({}, extra || {}, { Authorization: "Bearer " + gatewayToken });
   let agents = [], savedSessions = [], activeSessionId = null, activeAgentId = null, history = [];
   let mediaRecorder = null, mediaStream = null, audioChunks = [], listening = false;
 
@@ -42,7 +45,7 @@
 
   async function checkGateway() {
     try {
-      const response = await fetch(GATEWAY + "/health", { cache: "no-store" });
+      const response = await fetch(GATEWAY + "/health", { cache: "no-store", headers: gatewayHeaders() });
       if (!response.ok) throw new Error("Gateway not ready");
       const health = await response.json();
       const model = health.ollama?.model_available;
@@ -111,7 +114,7 @@
   async function speak(text) {
     try {
       const response = await fetch(GATEWAY + "/speak", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: gatewayHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ text })
       });
       if (!response.ok) throw new Error("Piper not ready");
@@ -199,7 +202,7 @@
           const blob = new Blob(audioChunks, { type: mediaRecorder?.mimeType || "audio/webm" });
           const form = new FormData();
           form.append("audio", blob, "pinpitch-recording" + (blob.type.includes("mp4") ? ".mp4" : ".webm"));
-          const response = await fetch(GATEWAY + "/transcribe", { method: "POST", body: form });
+          const response = await fetch(GATEWAY + "/transcribe", { method: "POST", headers: gatewayHeaders(), body: form });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.detail || "Local transcription unavailable.");
           if (!data.text?.trim()) throw new Error("No speech was detected. Please try again.");
@@ -234,6 +237,7 @@
     }
   }
 
+  $("unlockLocalGateway").addEventListener("click", async () => { gatewayToken = $("localGatewayToken").value.trim(); if (gatewayToken.length < 32) { state("Token must be at least 32 characters"); return; } sessionStorage.setItem(gatewayTokenKey, gatewayToken); await checkGateway(); });
   $("loadSavedSession").addEventListener("click", loadSelectedSession);
   $("talkStart").addEventListener("click", startRecording);
   $("talkStop").addEventListener("click", stopRecording);
