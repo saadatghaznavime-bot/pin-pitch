@@ -145,7 +145,7 @@ async function createDemoInboxMessage(){
   document.getElementById("demoBody").value="";toast("Sample conversation added");await loadInbox();await openInboxConversation(d.conversation.id);
  }catch(e){toast(e.message)}
 }
-\n
+
 async function loadVoiceReplyStatus(){
  const box=document.getElementById("voiceReplyStatus");if(!box)return;
  try{const d=await api("/voice-replies/settings");box.innerHTML="ElevenLabs: <b>"+(d.enabled?"Configured":"Needs API key + voice ID")+"</b> · WhatsApp delivery: <b>"+(d.whatsapp_ready?"Configured":"Not connected")+"</b> · SMS: <b>"+(d.sms_ready?"Configured":"Not connected")+"</b>";}catch(e){box.textContent=e.message}
