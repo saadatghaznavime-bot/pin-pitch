@@ -63,6 +63,7 @@ class Message(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     external_message_id: Mapped[str] = mapped_column(String(255), default="")
     delivery_status: Mapped[str] = mapped_column(String(32), default="received")
+    audio_url: Mapped[str] = mapped_column(String(600), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
 class BusinessFAQ(Base):
