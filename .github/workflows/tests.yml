@@ -19,6 +19,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
+      - name: Check Python and JavaScript syntax
+        run: |
+          python -m compileall -q app
+          node --check static/talk-to-agent.js
+          python -c "import re, pathlib; s=pathlib.Path('static/index.html').read_text(); blocks=re.findall(r'<script>(.*?)</script>', s, re.S); pathlib.Path('/tmp/pinpitch-inline.js').write_text(blocks[0])"
+          node --check /tmp/pinpitch-inline.js
       - name: Run tests
         env:
           JWT_SECRET: pinpitch-ci-only-secret
