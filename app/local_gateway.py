@@ -181,15 +181,18 @@ async def speak(payload: dict):
     if not model_path or not model_path.is_file():
         raise HTTPException(503, "Piper voice model is not configured. Set PIPER_MODEL to a local .onnx voice file.")
     try:
-        process = await asyncio.create_subprocess_exec(
-            "piper", "--model", str(model_path), "--output_file", "-",
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(process.communicate(text.encode("utf-8")), timeout=60)
-        if process.returncode != 0 or not stdout:
-            detail = stderr.decode("utf-8", "ignore")[-300:]
-            raise HTTPException(502, f"Piper synthesis failed: {detail or 'no audio returned'}")
-        return Response(content=stdout, media_type="audio/wav", headers={"X-PINPITCH-VOICE": "piper-local"})
+        with tempfile.TemporaryDirectory() as folder:
+            output_path = Path(folder) / "reply.wav"
+            process = await asyncio.create_subprocess_exec(
+                "piper", "--model", str(model_path), "--output_file", str(output_path),
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(process.communicate(text.encode("utf-8")), timeout=60)
+            if process.returncode != 0 or not output_path.is_file():
+                detail = stderr.decode("utf-8", "ignore")[-300:]
+                raise HTTPException(502, f"Piper synthesis failed: {detail or 'no audio returned'}")
+            audio_bytes = output_path.read_bytes()
+        return Response(content=audio_bytes, media_type="audio/wav", headers={"X-PINPITCH-VOICE": "piper-local"})
     except FileNotFoundError:
         raise HTTPException(503, "Piper CLI was not found. Install requirements-local.txt.")
     except asyncio.TimeoutError:
