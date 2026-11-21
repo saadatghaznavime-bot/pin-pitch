@@ -3,6 +3,7 @@ from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text
 from jose import JWTError
 from .db import Base, engine, get_db
 from .models import User, Agent, Call, ChannelConnection, Conversation, Message, BusinessFAQ
@@ -13,6 +14,11 @@ from .providers import MockTelephonyProvider
 from .voice import router as voice_router
 
 Base.metadata.create_all(bind=engine)
+# Small additive migration for existing demo databases (create_all does not add columns).
+with engine.begin() as connection:
+    columns = {col['name'] for col in inspect(engine).get_columns('messages')}
+    if 'audio_url' not in columns:
+        connection.execute(text("ALTER TABLE messages ADD COLUMN audio_url VARCHAR(600) DEFAULT ''"))
 app = FastAPI(title="PIN&PITCH", version="0.3.0")
 app.include_router(voice_router)
 provider = MockTelephonyProvider()
