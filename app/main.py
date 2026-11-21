@@ -9,11 +9,9 @@ from sqlalchemy import inspect, text
 from jose import JWTError
 from .db import Base, engine, get_db
 from .models import User, Agent, Call, ChannelConnection, Conversation, Message, BusinessFAQ
-from .voice_replies import elevenlabs_tts, deliver_text, deliver_whatsapp_voice
 from .schemas import AuthIn, TokenOut, AgentIn, AgentOut, DemoCallIn
 from .security import hash_password, verify_password, create_token, decode_token
 from .providers import MockTelephonyProvider
-from .voice import router as voice_router
 
 Base.metadata.create_all(bind=engine)
 # Small additive migration for existing demo databases (create_all does not add columns).
@@ -22,7 +20,6 @@ with engine.begin() as connection:
     if 'audio_url' not in columns:
         connection.execute(text("ALTER TABLE messages ADD COLUMN audio_url VARCHAR(600) DEFAULT ''"))
 app = FastAPI(title="PIN&PITCH", version="0.3.0")
-app.include_router(voice_router)
 provider = MockTelephonyProvider()
 sockets: dict[str, set[WebSocket]] = {}
 
@@ -39,7 +36,7 @@ async def broadcast(workspace: str, event: dict):
 
 @app.get("/health")
 def health():
-    return {"status":"ok","mode":"browser-realtime-ready"}
+    return {"status":"ok","mode":"zero-cost-demo","external_providers_enabled":False}
 
 @app.post("/auth/register", response_model=TokenOut)
 def register(data: AuthIn, db: Session=Depends(get_db)):
@@ -213,21 +210,17 @@ async def inbox_provider_webhook(channel:str, request:Request, db:Session=Depend
 @app.get("/voice-replies/settings")
 def voice_reply_settings(claims=Depends(current_claims)):
     return {
-        "enabled": bool(os.getenv("ELEVENLABS_API_KEY") and os.getenv("ELEVENLABS_VOICE_ID")),
-        "provider": "elevenlabs",
-        "default_format": "text_and_voice",
-        "permission_mode": os.getenv("AI_REPLY_PERMISSION_MODE", "hybrid"),
-        "model_id": os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5"),
-        "whatsapp_ready": bool(os.getenv("WHATSAPP_ACCESS_TOKEN") and os.getenv("WHATSAPP_PHONE_NUMBER_ID")),
-        "sms_ready": bool(os.getenv("TWILIO_ACCOUNT_SID") and os.getenv("TWILIO_AUTH_TOKEN") and os.getenv("TWILIO_SMS_FROM"))
+        "enabled": False,
+        "provider": "local_piper_gateway",
+        "default_format": "text_and_voice_in_local_browser",
+        "permission_mode": "demo_only",
+        "external_delivery": False,
+        "note": "Replies are stored in the PIN&PITCH demo inbox. Local speech is available through the optional loopback AI gateway."
     }
 
 @app.post("/voice-replies/generate")
-async def generate_voice_reply(payload:dict, request:Request, claims=Depends(current_claims)):
-    text_body=str(payload.get("text","")).strip()
-    path,filename=await elevenlabs_tts(text_body, payload.get("voice_id"))
-    base=os.getenv("PUBLIC_BASE_URL",str(request.base_url).rstrip("/"))
-    return {"audio_url":base+"/generated-audio/"+filename,"format":"ogg_opus","provider":"elevenlabs"}
+async def generate_voice_reply(payload:dict, claims=Depends(current_claims)):
+    raise HTTPException(410, "External voice generation is disabled. Use the optional local PIN&PITCH gateway /speak endpoint from the local browser.")
 
 @app.get("/business/faqs")
 def list_business_faqs(claims=Depends(current_claims),db:Session=Depends(get_db)):
@@ -255,7 +248,7 @@ def find_faq_reply(workspace:str, incoming:str, db:Session):
     return None
 
 @app.post("/inbox/conversations/{conversation_id}/ai-reply")
-async def run_hybrid_ai_reply(conversation_id:int, request:Request, claims=Depends(current_claims),db:Session=Depends(get_db)):
+async def run_hybrid_ai_reply(conversation_id:int, claims=Depends(current_claims),db:Session=Depends(get_db)):
     conv=db.query(Conversation).filter_by(id=conversation_id,workspace_id=claims["workspace"]).first()
     if not conv: raise HTTPException(404,"Conversation not found")
     incoming=db.query(Message).filter_by(conversation_id=conv.id,workspace_id=claims["workspace"],direction="inbound").order_by(Message.id.desc()).first()
@@ -264,46 +257,25 @@ async def run_hybrid_ai_reply(conversation_id:int, request:Request, claims=Depen
     if not faq:
         return {"status":"needs_human_approval","reason":"No approved FAQ matched. Add an approved FAQ or have a staff member write and approve the answer.","customer_message":incoming.body}
     answer=faq.answer
-    # Hybrid mode: only pre-approved FAQ answers can be sent automatically.
-    if conv.channel not in ("whatsapp","sms","webchat"):
-        return {"status":"needs_human_approval","reason":"This channel's outbound adapter is not enabled yet.","draft":answer}
-    path,filename=await elevenlabs_tts(answer)
-    base=os.getenv("PUBLIC_BASE_URL",str(request.base_url).rstrip("/"))
-    audio_url=base+"/generated-audio/"+filename
-    delivery=[]
-    if conv.channel in ("whatsapp","sms"):
-        text_result=await deliver_text(conv.channel,conv.customer_handle,answer)
-        delivery.append(text_result)
-    if conv.channel=="whatsapp":
-        voice_result=await deliver_whatsapp_voice(conv.customer_handle,path)
-        delivery.append(voice_result)
-    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status=("sent" if conv.channel=="whatsapp" else "text_sent_audio_in_app"),audio_url=audio_url)
-    conv.last_message=answer;conv.updated_at=datetime.now(timezone.utc)
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status="saved_demo_only",audio_url="")
+    conv.last_message=answer
+    conv.updated_at=datetime.now(timezone.utc)
     db.add(msg);db.commit();db.refresh(msg)
     await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
-    return {"status":"sent","mode":"hybrid_faq_auto","text":answer,"audio_url":audio_url,"voice_delivery":("whatsapp_voice_note" if conv.channel=="whatsapp" else "playable_inside_pinpitch_only"),"delivery":delivery}
+    return {"status":"saved_demo_only","mode":"approved_faq_match","text":answer,"external_delivery":False,"note":"Saved in the PIN&PITCH demo inbox only. No message or voice note was sent."}
 
 @app.post("/inbox/conversations/{conversation_id}/send-voice-reply")
-async def send_approved_voice_reply(conversation_id:int,payload:dict,request:Request,claims=Depends(current_claims),db:Session=Depends(get_db)):
+async def send_approved_voice_reply(conversation_id:int,payload:dict,claims=Depends(current_claims),db:Session=Depends(get_db)):
     conv=db.query(Conversation).filter_by(id=conversation_id,workspace_id=claims["workspace"]).first()
     if not conv: raise HTTPException(404,"Conversation not found")
     answer=str(payload.get("text","")).strip()
     if not answer or len(answer)>4000: raise HTTPException(400,"Approved reply must contain 1–4000 characters.")
-    path,filename=await elevenlabs_tts(answer)
-    base=os.getenv("PUBLIC_BASE_URL",str(request.base_url).rstrip("/"))
-    audio_url=base+"/generated-audio/"+filename
-    delivery=[]
-    if conv.channel in ("whatsapp","sms"):
-        delivery.append(await deliver_text(conv.channel,conv.customer_handle,answer))
-    if conv.channel=="whatsapp":
-        delivery.append(await deliver_whatsapp_voice(conv.customer_handle,path))
-    elif conv.channel not in ("sms","webchat"):
-        raise HTTPException(501,"This channel's outbound delivery adapter is not enabled. Reply was not sent.")
-    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status=("sent" if conv.channel=="whatsapp" else ("text_sent_audio_in_app" if conv.channel=="sms" else "stored_in_webchat")),audio_url=audio_url)
-    conv.last_message=answer;conv.updated_at=datetime.now(timezone.utc)
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status="saved_demo_only",audio_url="")
+    conv.last_message=answer
+    conv.updated_at=datetime.now(timezone.utc)
     db.add(msg);db.commit();db.refresh(msg)
     await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
-    return {"status":"sent","text":answer,"audio_url":audio_url,"voice_delivery":("whatsapp_voice_note" if conv.channel=="whatsapp" else "playable_inside_pinpitch_only"),"delivery":delivery}
+    return {"status":"saved_demo_only","text":answer,"audio_url":"","external_delivery":False,"note":"Saved in the PIN&PITCH demo inbox only. No text message or voice note was sent."}
 
 
 STATIC_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"static")
