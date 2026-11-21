@@ -97,7 +97,7 @@ function go(id,btn){document.querySelectorAll('.page').forEach(p=>p.classList.re
 function toast(t){let e=document.getElementById('toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',2100)}
 function createAgent(){let n=document.getElementById('agentName').value.trim();if(!n){toast('Please enter an agent name');return}toast('Draft saved: '+n);setTimeout(()=>go('agents'),700)}
 function callDetail(){go('call-detail')}
-function getQuickPhone(){const raw=(document.getElementById('quickPhone')?.value||'').trim();const phone=raw.replace(/[\\s().-]/g,'');if(!/^\\+?[0-9]{7,15}$/.test(phone)){toast('Enter a valid phone number with country code');return ''}return phone}
+function getQuickPhone(){const raw=(document.getElementById('quickPhone')?.value||'').trim();const phone=raw.replace(/[\s().-]/g,'');if(!/^\+?[0-9]{7,15}$/.test(phone)){toast('Enter a valid phone number with country code');return ''}return phone}
 function openPhoneCall(){const phone=getQuickPhone();if(!phone)return;window.location.href='tel:'+phone}
 function openPhoneSms(){const phone=getQuickPhone();if(!phone)return;const body=(document.getElementById('quickSmsBody')?.value||'').trim();window.location.href='sms:'+phone+'&body='+encodeURIComponent(body)}
 function compose(){let e=document.getElementById('composeBox');e.style.display=e.style.display==='none'?'block':'none'}
