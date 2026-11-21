@@ -38,8 +38,8 @@ def register(email):
 
 
 def test_workspace_crm_appointments_sessions_and_analytics_are_scoped():
-    owner_headers = register("owner@example.test")
-    other_headers = register("other@example.test")
+    owner_headers = register("owner@example.com")
+    other_headers = register("other@example.com")
 
     agent = client.post(
         "/agents",
@@ -52,7 +52,7 @@ def test_workspace_crm_appointments_sessions_and_analytics_are_scoped():
     contact = client.post(
         "/contacts",
         headers=owner_headers,
-        json={"name": "Jamie Customer", "email": "jamie@example.test", "lead_status": "qualified"},
+        json={"name": "Jamie Customer", "email": "jamie@example.com", "lead_status": "qualified"},
     )
     assert contact.status_code == 200
     contact_id = contact.json()["id"]
@@ -97,7 +97,7 @@ def test_workspace_crm_appointments_sessions_and_analytics_are_scoped():
 
 
 def test_external_delivery_is_disabled():
-    headers = register("demo@example.test")
+    headers = register("demo@example.com")
     settings = client.get("/voice-replies/settings", headers=headers)
     assert settings.status_code == 200
     assert settings.json()["external_delivery"] is False
