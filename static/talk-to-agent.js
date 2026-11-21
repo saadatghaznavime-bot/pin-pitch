@@ -11,7 +11,7 @@
       <span class="status" id="voiceState">Checking local AI…</span>
     </div>
     <p class="muted">Uses your local Ollama model, faster-whisper and Piper when installed. Conversations are saved in your PIN&PITCH workspace.</p>
-    <label class="field"><span>Select agent</span><select id="talkAgent" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"></select></label>
+    <label class="field"><span>Select agent</span><select id="talkAgent" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"></select></label><label class="field"><span>Saved conversations</span><select id="savedAgentSessions" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="">No saved conversations loaded</option></select></label><button class="ghost" id="loadSavedSession" style="width:100%;margin-bottom:8px">Load selected conversation</button>
     <div id="talkTranscript" style="min-height:64px;max-height:220px;overflow:auto;background:#fff6f0;border-radius:12px;padding:10px;font-size:12px;color:#555;margin:12px 0">Your saved conversation will appear here.</div>
     <label class="field"><span>Or type a message</span><input id="freeVoiceText" type="text" placeholder="Ask about hours, pricing, bookings…"></label>
     <div style="display:flex;gap:8px">
@@ -27,7 +27,7 @@
   const GATEWAY = "http://127.0.0.1:8765";
   const $ = id => document.getElementById(id);
   const state = value => { $("voiceState").textContent = value; };
-  let agents = [], activeSessionId = null, activeAgentId = null, history = [];
+  let agents = [], savedSessions = [], activeSessionId = null, activeAgentId = null, history = [];
   let mediaRecorder = null, mediaStream = null, audioChunks = [], listening = false;
 
   function log(who, text) {
@@ -63,7 +63,33 @@
         `<option value="${a.id}">${escapeHtml(a.name)}${a.enabled ? "" : " (draft)"}</option>`
       ).join("") || '<option value="">Create an agent first</option>';
       $("talkStart").disabled = agents.length === 0;
-      if (agents.length) await checkGateway();
+      if (agents.length) await checkGateway();\n      await loadSavedSessions();
+    } catch (e) { state(e.message); }
+  }
+
+  async function loadSavedSessions() {
+    if (!accessToken) return;
+    try {
+      savedSessions = await api("/agent-sessions");
+      const select = $("savedAgentSessions");
+      if (select) select.innerHTML = '<option value="">Choose a saved conversation…</option>' +
+        savedSessions.map(s => '<option value="' + s.id + '">' + escapeHtml(s.title) + ' · ' + new Date(s.updated_at).toLocaleString() + '</option>').join("");
+    } catch {}
+  }
+
+  async function loadSelectedSession() {
+    const id = Number($("savedAgentSessions").value);
+    const session = savedSessions.find(item => item.id === id);
+    if (!session) { state("Choose a saved conversation"); return; }
+    try {
+      const turns = await api("/agent-sessions/" + id + "/turns");
+      $("talkAgent").value = String(session.agent_id);
+      activeSessionId = session.id;
+      activeAgentId = session.agent_id;
+      history = turns.map(turn => ({ role: turn.role, content: turn.content }));
+      $("talkTranscript").textContent = "";
+      turns.forEach(turn => log(turn.role === "user" ? "You" : "Agent · saved", turn.content));
+      state("Saved conversation loaded");
     } catch (e) { state(e.message); }
   }
 
@@ -207,7 +233,7 @@
     }
   }
 
-  $("talkStart").addEventListener("click", startRecording);
+  $("loadSavedSession").addEventListener("click", loadSelectedSession);\n  $("talkStart").addEventListener("click", startRecording);
   $("talkStop").addEventListener("click", stopRecording);
   $("talkSend").addEventListener("click", () => {
     const input = $("freeVoiceText"); const value = input.value;
