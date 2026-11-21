@@ -78,11 +78,15 @@ async def _security_guard(request: Request, authorization: Optional[str] = Heade
     bucket.append(now)
 
 def _public_answer(raw: str) -> str:
-    """Remove Qwen/Ollama reasoning blocks before text reaches the UI or TTS."""
+    """Return only customer-facing text, even when Qwen omits the opening think tag."""
     answer = raw or ""
-    answer = re.sub(r"<think[^>]*>.*?</think>", "", answer, flags=re.IGNORECASE | re.DOTALL)
-    answer = re.sub(r"<think[^>]*>.*$", "", answer, flags=re.IGNORECASE | re.DOTALL)
-    answer = re.sub(r"</?think>", "", answer, flags=re.IGNORECASE)
+    # Standard tagged reasoning: keep text after the closing tag.
+    if re.search(r"</think\\s*>", answer, flags=re.IGNORECASE):
+        answer = re.split(r"</think\\s*>", answer, maxsplit=1, flags=re.IGNORECASE)[-1]
+    else:
+        # If an opening tag exists without a close, discard the unfinished reasoning.
+        answer = re.sub(r"<think[^>]*>.*$", "", answer, flags=re.IGNORECASE | re.DOTALL)
+    answer = re.sub(r"</?think[^>]*>", "", answer, flags=re.IGNORECASE)
     return answer.strip()
 
 
