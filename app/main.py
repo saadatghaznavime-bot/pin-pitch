@@ -1,11 +1,11 @@
-import os, uuid, asyncio
+import os, uuid, asyncio\nfrom datetime import datetime, timezone\nfrom fastapi import Request
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from jose import JWTError
 from .db import Base, engine, get_db
-from .models import User, Agent, Call
+from .models import User, Agent, Call, ChannelConnection, Conversation, Message
 from .schemas import AuthIn, TokenOut, AgentIn, AgentOut, DemoCallIn
 from .security import hash_password, verify_password, create_token, decode_token
 from .providers import MockTelephonyProvider
@@ -107,7 +107,99 @@ async def websocket_endpoint(ws:WebSocket,token:str):
     finally:
         for clients in sockets.values(): clients.discard(ws)
 
-STATIC_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"static")
+
+CHANNELS = ["whatsapp", "instagram", "facebook_messenger", "phone", "sms", "webchat", "tiktok"]
+
+def conversation_dict(c):
+    return {"id":c.id,"channel":c.channel,"customer_name":c.customer_name,"customer_handle":c.customer_handle,"status":c.status,"last_message":c.last_message,"updated_at":c.updated_at.isoformat()}
+
+@app.get("/inbox/channels")
+def inbox_channels(claims=Depends(current_claims), db:Session=Depends(get_db)):
+    rows=db.query(ChannelConnection).filter(ChannelConnection.workspace_id==claims["workspace"]).all()
+    by_channel={r.channel:r for r in rows}
+    return [{"channel":name,"status":by_channel[name].status if name in by_channel else "not_connected","display_name":by_channel[name].display_name if name in by_channel else ""} for name in CHANNELS]
+
+@app.post("/inbox/channels/{channel}/setup")
+def setup_channel(channel:str, claims=Depends(current_claims), db:Session=Depends(get_db)):
+    if channel not in CHANNELS: raise HTTPException(404,"Unsupported channel")
+    row=db.query(ChannelConnection).filter_by(workspace_id=claims["workspace"],channel=channel).first()
+    if not row:
+        row=ChannelConnection(workspace_id=claims["workspace"],channel=channel,status="pending_setup")
+        db.add(row)
+    else: row.status="pending_setup"
+    db.commit()
+    return {"channel":channel,"status":row.status,"message":"Provider credentials and webhook approval are required before live traffic can flow."}
+
+@app.get("/inbox/conversations")
+def inbox_conversations(channel:str|None=None, claims=Depends(current_claims), db:Session=Depends(get_db)):
+    q=db.query(Conversation).filter(Conversation.workspace_id==claims["workspace"])
+    if channel and channel!="all": q=q.filter(Conversation.channel==channel)
+    return [conversation_dict(c) for c in q.order_by(Conversation.updated_at.desc()).limit(200).all()]
+
+@app.get("/inbox/conversations/{conversation_id}/messages")
+def inbox_messages(conversation_id:int, claims=Depends(current_claims), db:Session=Depends(get_db)):
+    conv=db.query(Conversation).filter_by(id=conversation_id,workspace_id=claims["workspace"]).first()
+    if not conv: raise HTTPException(404,"Conversation not found")
+    rows=db.query(Message).filter_by(conversation_id=conv.id,workspace_id=claims["workspace"]).order_by(Message.created_at.asc()).all()
+    return [{"id":m.id,"direction":m.direction,"body":m.body,"delivery_status":m.delivery_status,"created_at":m.created_at.isoformat()} for m in rows]
+
+@app.post("/inbox/conversations/{conversation_id}/reply")
+async def inbox_reply(conversation_id:int, payload:dict, claims=Depends(current_claims), db:Session=Depends(get_db)):
+    conv=db.query(Conversation).filter_by(id=conversation_id,workspace_id=claims["workspace"]).first()
+    if not conv: raise HTTPException(404,"Conversation not found")
+    body=str(payload.get("body","")).strip()
+    if not body or len(body)>10000: raise HTTPException(400,"Message must be 1–10000 characters")
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=body,delivery_status="pending_provider")
+    conv.last_message=body; conv.updated_at=datetime.now(timezone.utc)
+    db.add(msg); db.commit(); db.refresh(msg)
+    await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
+    return {"id":msg.id,"delivery_status":"pending_provider","note":"Saved in PIN&PITCH. A channel provider must be connected before this can be delivered externally."}
+
+@app.post("/inbox/demo/inbound")
+async def inbox_demo_inbound(payload:dict, claims=Depends(current_claims), db:Session=Depends(get_db)):
+    channel=str(payload.get("channel","webchat"))
+    if channel not in CHANNELS: raise HTTPException(400,"Unsupported channel")
+    name=str(payload.get("customer_name","Demo customer"))[:160]
+    handle=str(payload.get("customer_handle",""))[:255]
+    body=str(payload.get("body","")).strip()
+    if not body: raise HTTPException(400,"Message body required")
+    thread=str(payload.get("external_thread_id","demo-"+uuid.uuid4().hex))
+    conv=db.query(Conversation).filter_by(workspace_id=claims["workspace"],channel=channel,external_thread_id=thread).first()
+    if not conv:
+        conv=Conversation(workspace_id=claims["workspace"],channel=channel,external_thread_id=thread,customer_name=name,customer_handle=handle)
+        db.add(conv); db.flush()
+    conv.last_message=body; conv.updated_at=datetime.now(timezone.utc)
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="inbound",body=body,delivery_status="received")
+    db.add(msg); db.commit(); db.refresh(conv); db.refresh(msg)
+    await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
+    return {"conversation":conversation_dict(conv),"message_id":msg.id,"demo_only":True}
+
+@app.post("/webhooks/inbox/{channel}")
+async def inbox_provider_webhook(channel:str, request:Request, db:Session=Depends(get_db)):
+    # Canonical adapter ingress. Provider-specific signature validation/normalization
+    # must be implemented before enabling this endpoint for public production traffic.
+    if channel not in CHANNELS: raise HTTPException(404,"Unsupported channel")
+    secret=os.getenv("INBOX_WEBHOOK_SECRET","")
+    supplied=request.headers.get("x-pinpitch-webhook-secret","")
+    if not secret or not supplied or not __import__("hmac").compare_digest(secret,supplied):
+        raise HTTPException(401,"Webhook authentication failed")
+    payload=await request.json()
+    workspace=str(payload.get("workspace_id",""))
+    body=str(payload.get("body","")).strip()
+    if not workspace or not body: raise HTTPException(400,"workspace_id and body are required")
+    thread=str(payload.get("external_thread_id",""))
+    if not thread: raise HTTPException(400,"external_thread_id is required")
+    conv=db.query(Conversation).filter_by(workspace_id=workspace,channel=channel,external_thread_id=thread).first()
+    if not conv:
+        conv=Conversation(workspace_id=workspace,channel=channel,external_thread_id=thread,customer_name=str(payload.get("customer_name","Customer"))[:160],customer_handle=str(payload.get("customer_handle",""))[:255])
+        db.add(conv); db.flush()
+    conv.last_message=body; conv.updated_at=datetime.now(timezone.utc)
+    msg=Message(workspace_id=workspace,conversation_id=conv.id,direction="inbound",body=body,external_message_id=str(payload.get("external_message_id",""))[:255],delivery_status="received")
+    db.add(msg); db.commit()
+    await broadcast(workspace,{"type":"inbox.message","conversation_id":conv.id})
+    return {"received":True}
+
+\nSTATIC_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"static")
 @app.get("/",include_in_schema=False)
 def app_home(): return FileResponse(os.path.join(STATIC_DIR,"index.html"))
 app.mount("/",StaticFiles(directory=STATIC_DIR,html=True),name="pwa")
