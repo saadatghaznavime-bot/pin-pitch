@@ -197,3 +197,9 @@ async def speak(payload: dict):
         raise HTTPException(503, "Piper CLI was not found. Install requirements-local.txt.")
     except asyncio.TimeoutError:
         raise HTTPException(504, "Piper synthesis timed out.")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    # Intentionally bind only to loopback. Never change this to 0.0.0.0.
+    uvicorn.run(app, host="127.0.0.1", port=8765, log_level="info")
