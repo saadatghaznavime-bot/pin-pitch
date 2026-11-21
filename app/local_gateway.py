@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -49,6 +50,15 @@ app.add_middleware(
 _whisper_model = None
 _whisper_device_actual: Optional[str] = None
 _whisper_compute_actual: Optional[str] = None
+
+
+def _public_answer(raw: str) -> str:
+    """Remove Qwen/Ollama reasoning blocks before text reaches the UI or TTS."""
+    answer = raw or ""
+    answer = re.sub(r"<think\\b[^>]*>.*?</think\\s*>", "", answer, flags=re.IGNORECASE | re.DOTALL)
+    answer = re.sub(r"<think\\b[^>]*>.*$", "", answer, flags=re.IGNORECASE | re.DOTALL)
+    answer = re.sub(r"</?think\\s*>", "", answer, flags=re.IGNORECASE)
+    return answer.strip()
 
 
 class ChatIn(BaseModel):
@@ -110,15 +120,21 @@ async def chat(data: ChatIn):
         content = item.get("content", "")
         if role in ("user", "assistant") and isinstance(content, str):
             messages.append({"role": role, "content": content[:8000]})
-    messages.append({"role": "user", "content": data.message})
+    messages.append({"role": "user", "content": data.message.rstrip() + " /no_think"})
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
                 f"{OLLAMA_URL}/api/chat",
-                json={"model": OLLAMA_MODEL, "messages": messages, "stream": False, "options": {"temperature": 0.3}},
+                json={
+                    "model": OLLAMA_MODEL,
+                    "messages": messages,
+                    "stream": False,
+                    "think": False,
+                    "options": {"temperature": 0.3},
+                },
             )
             response.raise_for_status()
-        answer = response.json().get("message", {}).get("content", "").strip()
+        answer = _public_answer(response.json().get("message", {}).get("content", ""))
         if not answer:
             raise HTTPException(502, "Ollama returned an empty response.")
         return {"reply": answer, "provider": "ollama-local", "model": OLLAMA_MODEL, "simulated_external_action": False}
