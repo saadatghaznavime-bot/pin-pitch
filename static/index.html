@@ -55,6 +55,16 @@ header{display:flex;align-items:center;justify-content:space-between;padding:18p
 <div id="inboxList" class="card"><p class="muted">Sign in to load conversations.</p></div>
 <div class="section-head"><h2>Selected conversation</h2></div>
 <div id="inboxThread" class="card"><p class="muted">Select a conversation to view its history.</p></div>
+<div class="section-head"><h2>Experience AI voice replies</h2><span class="demo-tag">LIVE SIMULATOR</span></div>
+<div class="card" style="border:1px solid #ffb58d;background:linear-gradient(145deg,#fff 0%,#fff5ee 100%)">
+ <p class="sub">Try a customer conversation without connecting WhatsApp or spending ElevenLabs credits. This simulator uses your browser's built-in speech voice.</p>
+ <label class="field"><span>Customer message</span><input id="voiceDemoQuestion" value="Hi! Are you open on Sunday, and can I book an appointment?"></label>
+ <label class="field"><span>Business response</span><input id="voiceDemoAnswer" value="Absolutely! We are open on Sunday from 10 AM to 6 PM. I can help you book an appointment. What time works best for you?"></label>
+ <div id="voiceDemoChat" style="display:flex;flex-direction:column;gap:9px;margin:12px 0"><div class="muted" style="text-align:center;padding:12px">Your simulated conversation will appear here.</div></div>
+ <label class="field"><span>Voice</span><select id="voiceDemoVoice" style="width:100%;padding:11px;border:1px solid #ead8cc;border-radius:10px;background:#fff"><option value="">Default device voice</option></select></label>
+ <div style="display:flex;gap:8px"><button class="primary" style="flex:1" onclick="runVoiceReplyDemo()">Play demo conversation</button><button class="ghost" onclick="stopVoiceReplyDemo()">Stop</button></div>
+ <p class="muted">Demo audio is generated locally by your browser. Real ElevenLabs audio is used after the API key and voice ID are configured.</p>
+</div>
 <div class="section-head"><h2>AI voice replies</h2><span class="pill">Text + Voice · Hybrid</span></div>
 <div class="card">
  <div id="voiceReplyStatus" class="muted">Checking ElevenLabs configuration…</div>
@@ -152,6 +162,51 @@ async function runHybridReply(){
 async function sendApprovedVoiceReply(){
  const input=document.getElementById("inboxReplyText");if(!selectedInboxConversation||!input||!input.value.trim()){toast("Select a conversation and write a reply");return}
  try{await api("/inbox/conversations/"+selectedInboxConversation+"/send-voice-reply",{method:"POST",body:JSON.stringify({text:input.value.trim()})});input.value="";toast("Text + voice reply sent");await openInboxConversation(selectedInboxConversation);await loadInbox();}catch(e){toast(e.message)}
+}
+
+
+function populateDemoVoices(){
+ const select=document.getElementById("voiceDemoVoice");if(!select||!window.speechSynthesis)return;
+ const voices=speechSynthesis.getVoices();const old=select.value;
+ select.innerHTML='<option value="">Default device voice</option>'+voices.map((v,i)=>'<option value="'+i+'">'+escapeHtml(v.name)+' · '+escapeHtml(v.lang)+'</option>').join("");
+ select.value=old;
+}
+if(window.speechSynthesis){populateDemoVoices();speechSynthesis.onvoiceschanged=populateDemoVoices;}
+function stopVoiceReplyDemo(){if(window.speechSynthesis)speechSynthesis.cancel();}
+function demoBubble(label,text,outbound){
+ const wrap=document.createElement("div");wrap.style.display="flex";wrap.style.justifyContent=outbound?"flex-end":"flex-start";
+ const bubble=document.createElement("div");bubble.style.cssText="max-width:88%;padding:12px 14px;border-radius:14px;background:"+(outbound?"#fff0e6":"#f5eee8")+";font-size:13px;line-height:1.45";
+ const strong=document.createElement("b");strong.textContent=label;strong.style.cssText="display:block;font-size:10px;color:#8b7769;margin-bottom:4px";
+ const content=document.createElement("div");content.textContent=text;bubble.append(strong,content);wrap.appendChild(bubble);return wrap;
+}
+function runVoiceReplyDemo(){
+ stopVoiceReplyDemo();
+ const question=document.getElementById("voiceDemoQuestion").value.trim();
+ const answer=document.getElementById("voiceDemoAnswer").value.trim();
+ const chat=document.getElementById("voiceDemoChat");
+ if(!question||!answer){toast("Add a customer message and a business answer");return}
+ chat.innerHTML="";
+ chat.appendChild(demoBubble("CUSTOMER · INBOUND",question,false));
+ const typing=document.createElement("div");typing.className="muted";typing.style.cssText="font-size:12px;padding:8px";typing.textContent="PIN&PITCH AI is preparing a reply…";chat.appendChild(typing);
+ setTimeout(()=>{
+  typing.remove();
+  const reply=demoBubble("PIN&PITCH AI · TEXT + VOICE",answer,true);
+  chat.appendChild(reply);
+  const player=document.createElement("div");player.style.cssText="display:flex;align-items:center;gap:8px;margin-top:8px;color:#d94b00;font-size:12px;font-weight:700";
+  const play=document.createElement("button");play.className="ghost";play.textContent="▶ Play voice reply";play.onclick=()=>speakDemoAnswer(answer);
+  player.appendChild(play);reply.firstChild.firstChild.after(player);
+  chat.scrollIntoView({behavior:"smooth",block:"nearest"});
+  speakDemoAnswer(answer);
+ },700);
+}
+function speakDemoAnswer(answer){
+ if(!window.speechSynthesis){toast("Speech playback is not supported in this browser");return}
+ speechSynthesis.cancel();
+ const utterance=new SpeechSynthesisUtterance(answer);
+ const selected=document.getElementById("voiceDemoVoice").value;
+ const voices=speechSynthesis.getVoices();if(selected!==""&&voices[Number(selected)])utterance.voice=voices[Number(selected)];
+ utterance.rate=0.96;utterance.pitch=1;
+ speechSynthesis.speak(utterance);
 }
 
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
