@@ -150,7 +150,7 @@
       try {
         const response = await fetch(GATEWAY + "/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: gatewayHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             message: question,
             instructions: (selected?.instructions || "You are a helpful business receptionist.") +
