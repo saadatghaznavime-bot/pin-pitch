@@ -55,6 +55,16 @@ header{display:flex;align-items:center;justify-content:space-between;padding:18p
 <div id="inboxList" class="card"><p class="muted">Sign in to load conversations.</p></div>
 <div class="section-head"><h2>Selected conversation</h2></div>
 <div id="inboxThread" class="card"><p class="muted">Select a conversation to view its history.</p></div>
+<div class="section-head"><h2>AI voice replies</h2><span class="pill">Text + Voice · Hybrid</span></div>
+<div class="card">
+ <div id="voiceReplyStatus" class="muted">Checking ElevenLabs configuration…</div>
+ <label class="field"><span>Approved FAQ question</span><input id="faqQuestion" placeholder="What are your opening hours?"></label>
+ <label class="field"><span>Approved answer</span><input id="faqAnswer" placeholder="We are open Monday to Saturday, 9 AM to 6 PM."></label>
+ <label class="field"><span>Matching keywords (at least two)</span><input id="faqKeywords" placeholder="opening hours open timings"></label>
+ <button class="ghost" style="width:100%" onclick="saveBusinessFAQ()">Save approved FAQ</button>
+ <p class="muted">Hybrid automation only auto-sends a saved FAQ when its keywords match. Other questions stay with staff for approval.</p>
+ <button class="primary" style="width:100%" onclick="runHybridReply()">Try AI auto-reply on selected conversation</button>
+</div>
 <div class="section-head"><h2>Test the inbox</h2><span class="demo-tag">DEMO ONLY</span></div>
 <div class="card"><label class="field"><span>Channel</span><select id="demoChannel" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:#fff"><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="facebook_messenger">Facebook Messenger</option><option value="phone">Phone call event</option><option value="sms">SMS</option><option value="webchat">Website live chat</option><option value="tiktok">TikTok</option></select></label><label class="field"><span>Customer name</span><input id="demoCustomer" placeholder="Alex Customer"></label><label class="field"><span>Customer handle / phone</span><input id="demoHandle" placeholder="@customer or +1..."></label><label class="field"><span>Message</span><input id="demoBody" placeholder="Hi, I need help with an appointment"></label><button class="primary" style="width:100%" onclick="createDemoInboxMessage()">Add sample inbound conversation</button><p class="muted">Creates a sample record only. It does not send or receive real messages on external platforms.</p></div>
 </section>
@@ -77,7 +87,7 @@ if('serviceWorker' in navigator && location.protocol.startsWith('http'))window.a
 const API_BASE = ''; let authMode='login', accessToken=localStorage.getItem('pp_token')||'', liveSocket=null;
 function api(path, options={}){options.headers={...(options.headers||{}),...(accessToken?{Authorization:'Bearer '+accessToken}:{})};if(options.body){options.headers['Content-Type']='application/json'}return fetch(API_BASE+path,options).then(async r=>{let d=await r.json().catch(()=>({detail:'Unexpected server response'}));if(!r.ok)throw new Error(d.detail||'Request failed');return d})}
 function toggleAuth(){authMode=authMode==='login'?'register':'login';document.getElementById('authTitle').textContent=authMode==='login'?'Welcome back':'Create your workspace';document.getElementById('authSubmit').textContent=authMode==='login'?'Sign in':'Create account';document.getElementById('authSwitch').textContent=authMode==='login'?'New to PIN&PITCH? Create an account':'Already have an account? Sign in';document.getElementById('authError').textContent=''}
-async function authSubmit(){let email=document.getElementById('authEmail').value.trim(),password=document.getElementById('authPassword').value;try{let d=await api('/auth/'+(authMode==='login'?'login':'register'),{method:'POST',body:JSON.stringify({email,password})});accessToken=d.access_token;localStorage.setItem('pp_token',accessToken);document.getElementById('authGate').style.display='none';toast('Welcome to PIN&PITCH');connectEvents();await refreshAgents();await refreshCalls();loadInboxChannels();loadInbox()}catch(e){document.getElementById('authError').textContent=e.message}}
+async function authSubmit(){let email=document.getElementById('authEmail').value.trim(),password=document.getElementById('authPassword').value;try{let d=await api('/auth/'+(authMode==='login'?'login':'register'),{method:'POST',body:JSON.stringify({email,password})});accessToken=d.access_token;localStorage.setItem('pp_token',accessToken);document.getElementById('authGate').style.display='none';toast('Welcome to PIN&PITCH');connectEvents();await refreshAgents();await refreshCalls();loadInboxChannels();loadInbox();loadVoiceReplyStatus()}catch(e){document.getElementById('authError').textContent=e.message}}
 function logout(){accessToken='';localStorage.removeItem('pp_token');if(liveSocket)liveSocket.close();document.getElementById('authGate').style.display='flex'}
 async function refreshAgents(){try{let agents=await api('/agents');let box=document.getElementById('agentList');if(box){box.innerHTML=agents.length?agents.map(a=>`<div class="agent"><div class="agent-icon">✦</div><div class="agent-info"><b>${escapeHtml(a.name)}</b><small>${escapeHtml(a.voice)} · ${a.enabled?'Published':'Draft'}</small></div><span class="status">${a.enabled?'Active':'Draft'}</span></div>`).join(''):'<p class="muted">No agents yet. Create your first agent.</p>'}let sel=document.getElementById('callAgent');if(sel)sel.innerHTML=agents.map(a=>`<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')||'<option value="">Create an agent first</option>'}catch(e){toast(e.message)}}
 async function refreshCalls(){try{let calls=await api('/calls');let box=document.getElementById('apiCalls');if(box)box.innerHTML=calls.length?calls.map(c=>`<div class="rowline"><div><b>${escapeHtml(c.phone_number)}</b><small>${c.direction} · ${c.duration_seconds}s · ${escapeHtml(c.summary)}</small></div><span class="status">${c.status}</span></div>`).join(''):'<p class="muted">No demo calls yet.</p>'}catch(e){}}
@@ -110,7 +120,7 @@ async function openInboxConversation(id){
  const box=document.getElementById("inboxThread");
  try{
   const rows=await api("/inbox/conversations/"+id+"/messages");
-  box.innerHTML='<div id="threadMessages" style="max-height:280px;overflow:auto">'+rows.map(m=>'<div style="display:flex;justify-content:'+(m.direction==="outbound"?"flex-end":"flex-start")+';margin:8px 0"><div style="max-width:85%;padding:10px 12px;border-radius:13px;background:'+(m.direction==="outbound"?"#fff0e6":"#f7f2ee")+'"><b style="font-size:10px">'+(m.direction==="outbound"?"You":"Customer")+'</b><div style="font-size:13px;margin-top:4px">'+escapeHtml(m.body)+'</div><small class="muted">'+escapeHtml(m.delivery_status)+'</small></div></div>').join("")+'</div><label class="field"><span>Reply</span><input id="inboxReplyText" placeholder="Write a reply…"></label><button class="primary" style="width:100%" onclick="sendInboxReply()">Save reply</button><p class="muted">Replies are saved internally until a real channel provider is connected.</p>';
+  box.innerHTML='<div id="threadMessages" style="max-height:280px;overflow:auto">'+rows.map(m=>'<div style="display:flex;justify-content:'+(m.direction==="outbound"?"flex-end":"flex-start")+';margin:8px 0"><div style="max-width:85%;padding:10px 12px;border-radius:13px;background:'+(m.direction==="outbound"?"#fff0e6":"#f7f2ee")+'"><b style="font-size:10px">'+(m.direction==="outbound"?"You":"Customer")+'</b><div style="font-size:13px;margin-top:4px">'+escapeHtml(m.body)+'</div>'+(m.audio_url?'<audio controls preload="none" style="width:210px;max-width:100%;margin-top:8px" src="'+escapeHtml(m.audio_url)+'"></audio>':'')+'<small class="muted">'+escapeHtml(m.delivery_status)+'</small></div></div>').join("")+'</div><label class="field"><span>Reply</span><input id="inboxReplyText" placeholder="Write a reply…"></label><button class="primary" style="width:100%" onclick="sendApprovedVoiceReply()">Generate &amp; send text + voice</button><p class="muted">WhatsApp supports a true voice note. Other channels depend on their provider audio capabilities.</p>';
  }catch(e){box.textContent=e.message}
 }
 async function sendInboxReply(){
@@ -125,7 +135,26 @@ async function createDemoInboxMessage(){
   document.getElementById("demoBody").value="";toast("Sample conversation added");await loadInbox();await openInboxConversation(d.conversation.id);
  }catch(e){toast(e.message)}
 }
-\nfunction escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+\n
+async function loadVoiceReplyStatus(){
+ const box=document.getElementById("voiceReplyStatus");if(!box)return;
+ try{const d=await api("/voice-replies/settings");box.innerHTML="ElevenLabs: <b>"+(d.enabled?"Configured":"Needs API key + voice ID")+"</b> · WhatsApp delivery: <b>"+(d.whatsapp_ready?"Configured":"Not connected")+"</b> · SMS: <b>"+(d.sms_ready?"Configured":"Not connected")+"</b>";}catch(e){box.textContent=e.message}
+}
+async function saveBusinessFAQ(){
+ const question=document.getElementById("faqQuestion").value.trim(),answer=document.getElementById("faqAnswer").value.trim(),keywords=document.getElementById("faqKeywords").value.trim();
+ if(!question||!answer||keywords.split(/[ ,]+/).filter(Boolean).length<2){toast("Add a question, answer and at least two matching keywords");return}
+ try{await api("/business/faqs",{method:"POST",body:JSON.stringify({question,answer,keywords})});toast("Approved FAQ saved");document.getElementById("faqQuestion").value="";document.getElementById("faqAnswer").value="";document.getElementById("faqKeywords").value="";}catch(e){toast(e.message)}
+}
+async function runHybridReply(){
+ if(!selectedInboxConversation){toast("Select a conversation first");return}
+ try{const d=await api("/inbox/conversations/"+selectedInboxConversation+"/ai-reply",{method:"POST",body:JSON.stringify({})});if(d.status==="needs_human_approval"){toast("Needs staff approval: "+d.reason);return}toast("FAQ answer sent with voice");await openInboxConversation(selectedInboxConversation);await loadInbox();}catch(e){toast(e.message)}
+}
+async function sendApprovedVoiceReply(){
+ const input=document.getElementById("inboxReplyText");if(!selectedInboxConversation||!input||!input.value.trim()){toast("Select a conversation and write a reply");return}
+ try{await api("/inbox/conversations/"+selectedInboxConversation+"/send-voice-reply",{method:"POST",body:JSON.stringify({text:input.value.trim()})});input.value="";toast("Text + voice reply sent");await openInboxConversation(selectedInboxConversation);await loadInbox();}catch(e){toast(e.message)}
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 // Replace the prototype's local-only agent creation with authenticated API persistence.
 createAgent=async function(){let n=document.getElementById('agentName').value.trim(),purpose=document.getElementById('agentPurpose').value.trim();if(!n){toast('Please enter an agent name');return}try{await api('/agents',{method:'POST',body:JSON.stringify({name:n,instructions:purpose,voice:'alloy',enabled:false})});toast('Agent draft saved');await refreshAgents();go('agents')}catch(e){toast(e.message)}};
 // Gate the app until a demo workspace session exists.
