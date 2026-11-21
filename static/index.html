@@ -141,7 +141,7 @@ async function openInboxConversation(id){
  const box=document.getElementById("inboxThread");
  try{
   const rows=await api("/inbox/conversations/"+id+"/messages");
-  box.innerHTML='<div id="threadMessages" style="max-height:280px;overflow:auto">'+rows.map(m=>'<div style="display:flex;justify-content:'+(m.direction==="outbound"?"flex-end":"flex-start")+';margin:8px 0"><div style="max-width:85%;padding:10px 12px;border-radius:13px;background:'+(m.direction==="outbound"?"#fff0e6":"#f7f2ee")+'"><b style="font-size:10px">'+(m.direction==="outbound"?"You":"Customer")+'</b><div style="font-size:13px;margin-top:4px">'+escapeHtml(m.body)+'</div>'+(m.audio_url?'<audio controls preload="none" style="width:210px;max-width:100%;margin-top:8px" src="'+escapeHtml(m.audio_url)+'"></audio>':'')+'<small class="muted">'+escapeHtml(m.delivery_status)+'</small></div></div>').join("")+'</div><label class="field"><span>Reply</span><input id="inboxReplyText" placeholder="Write a reply…"></label><button class="primary" style="width:100%" onclick="sendApprovedVoiceReply()">Generate &amp; send text + voice</button><p class="muted">WhatsApp supports a true voice note. Other channels depend on their provider audio capabilities.</p>';
+  box.innerHTML='<div id="threadMessages" style="max-height:280px;overflow:auto">'+rows.map(m=>'<div style="display:flex;justify-content:'+(m.direction==="outbound"?"flex-end":"flex-start")+';margin:8px 0"><div style="max-width:85%;padding:10px 12px;border-radius:13px;background:'+(m.direction==="outbound"?"#fff0e6":"#f7f2ee")+'"><b style="font-size:10px">'+(m.direction==="outbound"?"You":"Customer")+'</b><div style="font-size:13px;margin-top:4px">'+escapeHtml(m.body)+'</div>'+(m.audio_url?'<audio controls preload="none" style="width:210px;max-width:100%;margin-top:8px" src="'+escapeHtml(m.audio_url)+'"></audio>':'')+'<small class="muted">'+escapeHtml(m.delivery_status)+'</small></div></div>').join("")+'</div><label class="field"><span>Reply</span><input id="inboxReplyText" placeholder="Write a reply…"></label><button class="primary" style="width:100%" onclick="sendApprovedVoiceReply()">Save demo reply</button><p class="muted">Demo replies are saved here only. No external message or voice note is sent.</p>';
  }catch(e){box.textContent=e.message}
 }
 async function sendInboxReply(){
@@ -159,7 +159,7 @@ async function createDemoInboxMessage(){
 
 async function loadVoiceReplyStatus(){
  const box=document.getElementById("voiceReplyStatus");if(!box)return;
- try{const d=await api("/voice-replies/settings");box.innerHTML="ElevenLabs: <b>"+(d.enabled?"Configured":"Needs API key + voice ID")+"</b> · WhatsApp delivery: <b>"+(d.whatsapp_ready?"Configured":"Not connected")+"</b> · SMS: <b>"+(d.sms_ready?"Configured":"Not connected")+"</b>";}catch(e){box.textContent=e.message}
+ try{const d=await api("/voice-replies/settings");box.innerHTML="Voice: <b>Optional local Piper gateway</b> · External delivery: <b>Disabled</b> · Replies stay in this demo inbox.";}catch(e){box.textContent=e.message}
 }
 async function saveBusinessFAQ(){
  const question=document.getElementById("faqQuestion").value.trim(),answer=document.getElementById("faqAnswer").value.trim(),keywords=document.getElementById("faqKeywords").value.trim();
@@ -168,11 +168,11 @@ async function saveBusinessFAQ(){
 }
 async function runHybridReply(){
  if(!selectedInboxConversation){toast("Select a conversation first");return}
- try{const d=await api("/inbox/conversations/"+selectedInboxConversation+"/ai-reply",{method:"POST",body:JSON.stringify({})});if(d.status==="needs_human_approval"){toast("Needs staff approval: "+d.reason);return}toast("FAQ answer sent with voice");await openInboxConversation(selectedInboxConversation);await loadInbox();}catch(e){toast(e.message)}
+ try{const d=await api("/inbox/conversations/"+selectedInboxConversation+"/ai-reply",{method:"POST",body:JSON.stringify({})});if(d.status==="needs_human_approval"){toast("Needs staff approval: "+d.reason);return}toast("Approved FAQ reply saved · demo only");await openInboxConversation(selectedInboxConversation);await loadInbox();}catch(e){toast(e.message)}
 }
 async function sendApprovedVoiceReply(){
  const input=document.getElementById("inboxReplyText");if(!selectedInboxConversation||!input||!input.value.trim()){toast("Select a conversation and write a reply");return}
- try{await api("/inbox/conversations/"+selectedInboxConversation+"/send-voice-reply",{method:"POST",body:JSON.stringify({text:input.value.trim()})});input.value="";toast("Text + voice reply sent");await openInboxConversation(selectedInboxConversation);await loadInbox();}catch(e){toast(e.message)}
+ try{await api("/inbox/conversations/"+selectedInboxConversation+"/send-voice-reply",{method:"POST",body:JSON.stringify({text:input.value.trim()})});input.value="";toast("Demo reply saved · not externally delivered");await openInboxConversation(selectedInboxConversation);await loadInbox();}catch(e){toast(e.message)}
 }
 
 
