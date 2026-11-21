@@ -64,3 +64,12 @@ class Message(Base):
     external_message_id: Mapped[str] = mapped_column(String(255), default="")
     delivery_status: Mapped[str] = mapped_column(String(32), default="received")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+class BusinessFAQ(Base):
+    __tablename__ = "business_faqs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    keywords: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
