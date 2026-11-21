@@ -1,4 +1,6 @@
 import os, uuid, asyncio
+from dotenv import load_dotenv
+load_dotenv()
 from datetime import datetime, timezone
 from fastapi import Request
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header
