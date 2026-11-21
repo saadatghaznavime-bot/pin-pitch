@@ -67,10 +67,25 @@ $env:WHISPER_DEVICE = "cpu"
 $env:WHISPER_COMPUTE_TYPE = "int8"
 $env:PIPER_MODEL = "C:\full\path\to\your\voice.onnx"
 $env:LOCAL_AI_ALLOWED_ORIGINS = "http://127.0.0.1:8000,http://localhost:8000"
+# Generate a private token once and keep it secret:
+$env:LOCAL_AI_API_TOKEN = python -c "import secrets; print(secrets.token_urlsafe(48))"
+$env:LOCAL_AI_API_TOKEN
 python -m app.local_gateway
 ```
 
-The gateway health endpoint is http://127.0.0.1:8765/health.
+The gateway health endpoint is http://127.0.0.1:8765/health. Paste the generated token into the Local gateway security token field in the PIN&PITCH agent panel and select Unlock local AI. The token is kept in that browser tab session storage and cleared when the tab session ends.
+
+### Local gateway security controls
+
+- Binds only to 127.0.0.1; never use 0.0.0.0, router port forwarding, public tunnels or LAN exposure.
+- Requires a randomly generated bearer token of at least 32 characters for health, chat, transcription and speech endpoints.
+- Checks the request Host and exact browser Origin against the local allowlist. CORS is an additional browser control, not a replacement for authentication.
+- Applies in-memory rate limits: 60 requests/minute and 12 transcription requests/minute per client.
+- Disables interactive API documentation and OpenAPI routes on the local gateway.
+- Caps audio uploads at 20 MB and speech input at 4,000 characters.
+- Keeps the token out of source control; do not paste it into GitHub, screenshots, chats or public logs.
+
+This reduces casual access by other websites and network devices. It does not replace Windows account security, software updates, or protection against malware or XSS running inside the trusted PIN&PITCH page. Anyone with access to your Windows account or browser session may be able to use the local service. Rotate the token by generating a new value and restarting the gateway.
 
 Available endpoints:
 
