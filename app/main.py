@@ -1,4 +1,6 @@
-import os, uuid, asyncio\nfrom datetime import datetime, timezone\nfrom fastapi import Request
+import os, uuid, asyncio
+from datetime import datetime, timezone
+from fastapi import Request
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -206,7 +208,8 @@ async def inbox_provider_webhook(channel:str, request:Request, db:Session=Depend
     await broadcast(workspace,{"type":"inbox.message","conversation_id":conv.id})
     return {"received":True}
 
-\n
+
+
 @app.get("/voice-replies/settings")
 def voice_reply_settings(claims=Depends(current_claims)):
     return {
@@ -302,7 +305,8 @@ async def send_approved_voice_reply(conversation_id:int,payload:dict,request:Req
     await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
     return {"status":"sent","text":answer,"audio_url":audio_url,"voice_delivery":("whatsapp_voice_note" if conv.channel=="whatsapp" else "playable_inside_pinpitch_only"),"delivery":delivery}
 
-\nSTATIC_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"static")
+
+STATIC_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"static")
 @app.get("/",include_in_schema=False)
 def app_home(): return FileResponse(os.path.join(STATIC_DIR,"index.html"))
 app.mount("/",StaticFiles(directory=STATIC_DIR,html=True),name="pwa")
