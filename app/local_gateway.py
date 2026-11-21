@@ -26,7 +26,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 PIPER_MODEL = os.getenv("PIPER_MODEL", "")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
@@ -159,7 +159,7 @@ async def chat(data: ChatIn):
                     "messages": messages,
                     "stream": False,
                     "think": False,
-                    "options": {"temperature": 0.3},
+                    "options": {"temperature": 0.2, "num_predict": 160},
                 },
             )
             response.raise_for_status()
