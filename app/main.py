@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import inspect, text
 from jose import JWTError
 from .db import Base, engine, get_db
-from .models import User, Agent, Call, ChannelConnection, Conversation, Message, BusinessFAQ
+from .models import User, Agent, Call, ChannelConnection, Conversation, Message, BusinessFAQ, Contact, Appointment, AgentSession, AgentSessionTurn
 from .schemas import AuthIn, TokenOut, AgentIn, AgentOut, DemoCallIn
 from .security import hash_password, verify_password, create_token, decode_token
 from .providers import MockTelephonyProvider
@@ -277,6 +277,161 @@ async def send_approved_voice_reply(conversation_id:int,payload:dict,claims=Depe
     await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
     return {"status":"saved_demo_only","text":answer,"audio_url":"","external_delivery":False,"note":"Saved in the PIN&PITCH demo inbox only. No text message or voice note was sent."}
 
+
+
+# Workspace-scoped CRM, appointment and saved agent-conversation APIs.
+LEAD_STATUSES = {"new", "qualified", "customer", "lost"}
+APPOINTMENT_STATUSES = {"scheduled", "completed", "cancelled"}
+
+def _parse_datetime(value):
+    if not value:
+        raise HTTPException(400, "scheduled_at is required as an ISO-8601 date/time.")
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(400, "scheduled_at must be a valid ISO-8601 date/time.")
+
+def _contact_dict(row):
+    return {"id":row.id,"name":row.name,"email":row.email,"phone":row.phone,"company":row.company,"lead_status":row.lead_status,"source":row.source,"notes":row.notes,"created_at":row.created_at.isoformat()}
+
+@app.get("/contacts")
+def list_contacts(q:str|None=None, lead_status:str|None=None, claims=Depends(current_claims), db:Session=Depends(get_db)):
+    query=db.query(Contact).filter(Contact.workspace_id==claims["workspace"])
+    if lead_status:
+        if lead_status not in LEAD_STATUSES: raise HTTPException(400,"Invalid lead_status.")
+        query=query.filter(Contact.lead_status==lead_status)
+    if q:
+        term="%"+q.strip()[:100]+"%"
+        query=query.filter((Contact.name.ilike(term))|(Contact.email.ilike(term))|(Contact.phone.ilike(term))|(Contact.company.ilike(term)))
+    return [_contact_dict(row) for row in query.order_by(Contact.updated_at.desc()).limit(500).all()]
+
+@app.post("/contacts")
+def create_contact(payload:dict, claims=Depends(current_claims), db:Session=Depends(get_db)):
+    name=str(payload.get("name","")).strip()
+    if not name or len(name)>160: raise HTTPException(400,"Contact name is required (maximum 160 characters).")
+    status=str(payload.get("lead_status","new"))
+    if status not in LEAD_STATUSES: raise HTTPException(400,"Invalid lead_status.")
+    row=Contact(workspace_id=claims["workspace"],name=name,email=str(payload.get("email",""))[:255],phone=str(payload.get("phone",""))[:40],company=str(payload.get("company",""))[:160],lead_status=status,source=str(payload.get("source","manual"))[:80],notes=str(payload.get("notes",""))[:5000])
+    db.add(row);db.commit();db.refresh(row)
+    return _contact_dict(row)
+
+@app.patch("/contacts/{contact_id}")
+def update_contact(contact_id:int,payload:dict,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    row=db.query(Contact).filter_by(id=contact_id,workspace_id=claims["workspace"]).first()
+    if not row: raise HTTPException(404,"Contact not found.")
+    for key,limit in (("name",160),("email",255),("phone",40),("company",160),("source",80),("notes",5000)):
+        if key in payload:
+            value=str(payload[key]).strip()
+            if key=="name" and not value: raise HTTPException(400,"Contact name cannot be empty.")
+            setattr(row,key,value[:limit])
+    if "lead_status" in payload:
+        if payload["lead_status"] not in LEAD_STATUSES: raise HTTPException(400,"Invalid lead_status.")
+        row.lead_status=payload["lead_status"]
+    row.updated_at=datetime.now(timezone.utc)
+    db.commit();db.refresh(row)
+    return _contact_dict(row)
+
+def _appointment_dict(row):
+    return {"id":row.id,"contact_id":row.contact_id,"customer_name":row.customer_name,"customer_email":row.customer_email,"customer_phone":row.customer_phone,"service":row.service,"scheduled_at":row.scheduled_at.isoformat(),"status":row.status,"notes":row.notes}
+
+@app.get("/appointments")
+def list_appointments(status:str|None=None,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    query=db.query(Appointment).filter(Appointment.workspace_id==claims["workspace"])
+    if status:
+        if status not in APPOINTMENT_STATUSES: raise HTTPException(400,"Invalid appointment status.")
+        query=query.filter(Appointment.status==status)
+    return [_appointment_dict(row) for row in query.order_by(Appointment.scheduled_at.asc()).limit(500).all()]
+
+@app.post("/appointments")
+def create_appointment(payload:dict,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    contact_id=payload.get("contact_id")
+    contact=None
+    if contact_id is not None:
+        contact=db.query(Contact).filter_by(id=int(contact_id),workspace_id=claims["workspace"]).first()
+        if not contact: raise HTTPException(404,"Contact not found in this workspace.")
+    name=str(payload.get("customer_name") or (contact.name if contact else "")).strip()
+    if not name or len(name)>160: raise HTTPException(400,"Customer name is required.")
+    row=Appointment(workspace_id=claims["workspace"],contact_id=contact.id if contact else None,customer_name=name,customer_email=str(payload.get("customer_email") or (contact.email if contact else ""))[:255],customer_phone=str(payload.get("customer_phone") or (contact.phone if contact else ""))[:40],service=str(payload.get("service",""))[:160],scheduled_at=_parse_datetime(payload.get("scheduled_at")),status="scheduled",notes=str(payload.get("notes",""))[:5000])
+    db.add(row);db.commit();db.refresh(row)
+    return _appointment_dict(row)
+
+@app.patch("/appointments/{appointment_id}")
+def update_appointment(appointment_id:int,payload:dict,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    row=db.query(Appointment).filter_by(id=appointment_id,workspace_id=claims["workspace"]).first()
+    if not row: raise HTTPException(404,"Appointment not found.")
+    if "status" in payload:
+        if payload["status"] not in APPOINTMENT_STATUSES: raise HTTPException(400,"Status must be scheduled, completed or cancelled.")
+        row.status=payload["status"]
+    if "scheduled_at" in payload: row.scheduled_at=_parse_datetime(payload["scheduled_at"])
+    if "service" in payload: row.service=str(payload["service"])[:160]
+    if "notes" in payload: row.notes=str(payload["notes"])[:5000]
+    db.commit();db.refresh(row)
+    return _appointment_dict(row)
+
+@app.get("/agent-sessions")
+def list_agent_sessions(claims=Depends(current_claims),db:Session=Depends(get_db)):
+    rows=db.query(AgentSession).filter_by(workspace_id=claims["workspace"]).order_by(AgentSession.updated_at.desc()).limit(200).all()
+    return [{"id":r.id,"agent_id":r.agent_id,"title":r.title,"status":r.status,"created_at":r.created_at.isoformat(),"updated_at":r.updated_at.isoformat()} for r in rows]
+
+@app.post("/agent-sessions")
+def create_agent_session(payload:dict,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    try: agent_id=int(payload.get("agent_id"))
+    except (TypeError,ValueError): raise HTTPException(400,"agent_id is required.")
+    agent=db.query(Agent).filter_by(id=agent_id,workspace_id=claims["workspace"]).first()
+    if not agent: raise HTTPException(404,"Agent not found in this workspace.")
+    row=AgentSession(workspace_id=claims["workspace"],agent_id=agent.id,title=str(payload.get("title") or (agent.name+" conversation"))[:180])
+    db.add(row);db.commit();db.refresh(row)
+    return {"id":row.id,"agent_id":row.agent_id,"title":row.title,"status":row.status}
+
+@app.get("/agent-sessions/{session_id}/turns")
+def list_agent_session_turns(session_id:int,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    session=db.query(AgentSession).filter_by(id=session_id,workspace_id=claims["workspace"]).first()
+    if not session: raise HTTPException(404,"Conversation not found.")
+    rows=db.query(AgentSessionTurn).filter_by(session_id=session.id,workspace_id=claims["workspace"]).order_by(AgentSessionTurn.id.asc()).all()
+    return [{"id":r.id,"role":r.role,"content":r.content,"created_at":r.created_at.isoformat()} for r in rows]
+
+@app.post("/agent-sessions/{session_id}/turn")
+async def add_agent_session_turn(session_id:int,payload:dict,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    session=db.query(AgentSession).filter_by(id=session_id,workspace_id=claims["workspace"]).first()
+    if not session: raise HTTPException(404,"Conversation not found.")
+    message=str(payload.get("message","")).strip()
+    if not message or len(message)>8000: raise HTTPException(400,"Message must contain 1–8000 characters.")
+    agent=db.query(Agent).filter_by(id=session.agent_id,workspace_id=claims["workspace"]).first()
+    user_turn=AgentSessionTurn(workspace_id=claims["workspace"],session_id=session.id,role="user",content=message)
+    faq=find_faq_reply(claims["workspace"],message,db)
+    if faq:
+        answer=faq.answer
+        mode="approved_faq"
+    else:
+        answer="I don't have a verified answer for that yet. I can take your details and have a team member follow up. What is the best name and contact number to reach you?"
+        mode="safe_fallback"
+    assistant_turn=AgentSessionTurn(workspace_id=claims["workspace"],session_id=session.id,role="assistant",content=answer)
+    if session.title=="New conversation":
+        session.title=message[:160]
+    session.updated_at=datetime.now(timezone.utc)
+    db.add_all([user_turn,assistant_turn]);db.commit()
+    return {"user_turn":{"role":"user","content":message},"assistant_turn":{"role":"assistant","content":answer},"mode":mode,"agent_name":agent.name if agent else "PIN&PITCH agent","external_action":False,"note":"This hosted fallback uses approved FAQ data only. Connect the optional local gateway for local model inference."}
+
+@app.get("/local-ai/settings")
+def local_ai_settings():
+    return {"enabled":True,"gateway_url":"http://127.0.0.1:8765","provider":"ollama_local","model":"qwen3:4b","external_api_cost":False,"note":"Gateway is optional and must be running on the same PC as the browser. Hosted HTTPS access may be blocked by browser local-network security."}
+
+@app.get("/analytics")
+def analytics(claims=Depends(current_claims),db:Session=Depends(get_db)):
+    workspace=claims["workspace"]
+    calls=db.query(Call).filter_by(workspace_id=workspace).count()
+    contacts=db.query(Contact).filter_by(workspace_id=workspace).count()
+    appointments=db.query(Appointment).filter_by(workspace_id=workspace).count()
+    conversations=db.query(Conversation).filter_by(workspace_id=workspace).count()
+    messages=db.query(Message).filter_by(workspace_id=workspace).count()
+    sessions=db.query(AgentSession).filter_by(workspace_id=workspace).count()
+    seven_days_ago=datetime.now(timezone.utc).replace(tzinfo=None)-__import__("datetime").timedelta(days=7)
+    recent_calls=db.query(Call).filter(Call.workspace_id==workspace,Call.id>0).count()
+    upcoming=db.query(Appointment).filter(Appointment.workspace_id==workspace,Appointment.status=="scheduled",Appointment.scheduled_at>=datetime.now(timezone.utc).replace(tzinfo=None)).count()
+    return {"period":"all_time","calls":calls,"contacts":contacts,"appointments":appointments,"upcoming_appointments":upcoming,"conversations":conversations,"messages":messages,"agent_sessions":sessions,"lead_statuses":{status:db.query(Contact).filter_by(workspace_id=workspace,lead_status=status).count() for status in sorted(LEAD_STATUSES)},"demo_only":True}
 
 STATIC_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"static")
 @app.get("/",include_in_schema=False)
