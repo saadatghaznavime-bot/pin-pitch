@@ -74,3 +74,54 @@ class BusinessFAQ(Base):
     answer: Mapped[str] = mapped_column(Text)
     keywords: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Contact(Base):
+    __tablename__ = "contacts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    email: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    company: Mapped[str] = mapped_column(String(160), default="")
+    lead_status: Mapped[str] = mapped_column(String(32), default="new")
+    source: Mapped[str] = mapped_column(String(80), default="manual")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Appointment(Base):
+    __tablename__ = "appointments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"), nullable=True, index=True)
+    customer_name: Mapped[str] = mapped_column(String(160))
+    customer_email: Mapped[str] = mapped_column(String(255), default="")
+    customer_phone: Mapped[str] = mapped_column(String(40), default="")
+    service: Mapped[str] = mapped_column(String(160), default="")
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[str] = mapped_column(String(24), default="scheduled")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AgentSession(Base):
+    __tablename__ = "agent_sessions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180), default="New conversation")
+    status: Mapped[str] = mapped_column(String(24), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class AgentSessionTurn(Base):
+    __tablename__ = "agent_session_turns"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("agent_sessions.id"), index=True)
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
