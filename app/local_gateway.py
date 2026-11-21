@@ -145,6 +145,12 @@ def _load_whisper():
     return _whisper_model
 
 
+def _transcribe_file(model, file_path: str):
+    segments, info = model.transcribe(file_path, beam_size=5)
+    transcript = " ".join(segment.text.strip() for segment in segments).strip()
+    return transcript, getattr(info, "language", None)
+
+
 @app.post("/transcribe")
 async def transcribe(audio: UploadFile = File(...)):
     raw = await audio.read(MAX_AUDIO_BYTES + 1)
@@ -157,9 +163,8 @@ async def transcribe(audio: UploadFile = File(...)):
             handle.write(raw)
             temp_path = handle.name
         model = await asyncio.to_thread(_load_whisper)
-        segments, info = await asyncio.to_thread(model.transcribe, temp_path, beam_size=5)
-        transcript = " ".join(segment.text.strip() for segment in segments).strip()
-        return {"text": transcript, "language": getattr(info, "language", None), "device": _whisper_device_actual, "compute_type": _whisper_compute_actual, "provider": "faster-whisper-local"}
+        transcript, language = await asyncio.to_thread(_transcribe_file, model, temp_path)
+        return {"text": transcript, "language": language, "device": _whisper_device_actual, "compute_type": _whisper_compute_actual, "provider": "faster-whisper-local"}
     except HTTPException:
         raise
     except Exception as exc:
