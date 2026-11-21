@@ -63,7 +63,8 @@
         `<option value="${a.id}">${escapeHtml(a.name)}${a.enabled ? "" : " (draft)"}</option>`
       ).join("") || '<option value="">Create an agent first</option>';
       $("talkStart").disabled = agents.length === 0;
-      if (agents.length) await checkGateway();\n      await loadSavedSessions();
+      if (agents.length) await checkGateway();
+      await loadSavedSessions();
     } catch (e) { state(e.message); }
   }
 
@@ -233,7 +234,8 @@
     }
   }
 
-  $("loadSavedSession").addEventListener("click", loadSelectedSession);\n  $("talkStart").addEventListener("click", startRecording);
+  $("loadSavedSession").addEventListener("click", loadSelectedSession);
+  $("talkStart").addEventListener("click", startRecording);
   $("talkStop").addEventListener("click", stopRecording);
   $("talkSend").addEventListener("click", () => {
     const input = $("freeVoiceText"); const value = input.value;
