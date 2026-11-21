@@ -274,11 +274,11 @@ async def run_hybrid_ai_reply(conversation_id:int, request:Request, claims=Depen
     if conv.channel=="whatsapp":
         voice_result=await deliver_whatsapp_voice(conv.customer_handle,path)
         delivery.append(voice_result)
-    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status="sent",audio_url=audio_url)
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status=("sent" if conv.channel=="whatsapp" else "text_sent_audio_in_app"),audio_url=audio_url)
     conv.last_message=answer;conv.updated_at=datetime.now(timezone.utc)
     db.add(msg);db.commit();db.refresh(msg)
     await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
-    return {"status":"sent","mode":"hybrid_faq_auto","text":answer,"audio_url":audio_url,"delivery":delivery}
+    return {"status":"sent","mode":"hybrid_faq_auto","text":answer,"audio_url":audio_url,"voice_delivery":("whatsapp_voice_note" if conv.channel=="whatsapp" else "playable_inside_pinpitch_only"),"delivery":delivery}
 
 @app.post("/inbox/conversations/{conversation_id}/send-voice-reply")
 async def send_approved_voice_reply(conversation_id:int,payload:dict,request:Request,claims=Depends(current_claims),db:Session=Depends(get_db)):
@@ -296,11 +296,11 @@ async def send_approved_voice_reply(conversation_id:int,payload:dict,request:Req
         delivery.append(await deliver_whatsapp_voice(conv.customer_handle,path))
     elif conv.channel not in ("sms","webchat"):
         raise HTTPException(501,"This channel's outbound delivery adapter is not enabled. Reply was not sent.")
-    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status="sent" if conv.channel!="webchat" else "stored_in_webchat",audio_url=audio_url)
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status=("sent" if conv.channel=="whatsapp" else ("text_sent_audio_in_app" if conv.channel=="sms" else "stored_in_webchat")),audio_url=audio_url)
     conv.last_message=answer;conv.updated_at=datetime.now(timezone.utc)
     db.add(msg);db.commit();db.refresh(msg)
     await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
-    return {"status":"sent","text":answer,"audio_url":audio_url,"delivery":delivery}
+    return {"status":"sent","text":answer,"audio_url":audio_url,"voice_delivery":("whatsapp_voice_note" if conv.channel=="whatsapp" else "playable_inside_pinpitch_only"),"delivery":delivery}
 
 \nSTATIC_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"static")
 @app.get("/",include_in_schema=False)
