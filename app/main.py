@@ -5,7 +5,8 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from jose import JWTError
 from .db import Base, engine, get_db
-from .models import User, Agent, Call, ChannelConnection, Conversation, Message
+from .models import User, Agent, Call, ChannelConnection, Conversation, Message, BusinessFAQ
+from .voice_replies import elevenlabs_tts, deliver_text, deliver_whatsapp_voice
 from .schemas import AuthIn, TokenOut, AgentIn, AgentOut, DemoCallIn
 from .security import hash_password, verify_password, create_token, decode_token
 from .providers import MockTelephonyProvider
@@ -141,7 +142,7 @@ def inbox_messages(conversation_id:int, claims=Depends(current_claims), db:Sessi
     conv=db.query(Conversation).filter_by(id=conversation_id,workspace_id=claims["workspace"]).first()
     if not conv: raise HTTPException(404,"Conversation not found")
     rows=db.query(Message).filter_by(conversation_id=conv.id,workspace_id=claims["workspace"]).order_by(Message.created_at.asc()).all()
-    return [{"id":m.id,"direction":m.direction,"body":m.body,"delivery_status":m.delivery_status,"created_at":m.created_at.isoformat()} for m in rows]
+    return [{"id":m.id,"direction":m.direction,"body":m.body,"delivery_status":m.delivery_status,"audio_url":m.audio_url,"created_at":m.created_at.isoformat()} for m in rows]
 
 @app.post("/inbox/conversations/{conversation_id}/reply")
 async def inbox_reply(conversation_id:int, payload:dict, claims=Depends(current_claims), db:Session=Depends(get_db)):
@@ -198,6 +199,102 @@ async def inbox_provider_webhook(channel:str, request:Request, db:Session=Depend
     db.add(msg); db.commit()
     await broadcast(workspace,{"type":"inbox.message","conversation_id":conv.id})
     return {"received":True}
+
+\n
+@app.get("/voice-replies/settings")
+def voice_reply_settings(claims=Depends(current_claims)):
+    return {
+        "enabled": bool(os.getenv("ELEVENLABS_API_KEY") and os.getenv("ELEVENLABS_VOICE_ID")),
+        "provider": "elevenlabs",
+        "default_format": "text_and_voice",
+        "permission_mode": os.getenv("AI_REPLY_PERMISSION_MODE", "hybrid"),
+        "model_id": os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5"),
+        "whatsapp_ready": bool(os.getenv("WHATSAPP_ACCESS_TOKEN") and os.getenv("WHATSAPP_PHONE_NUMBER_ID")),
+        "sms_ready": bool(os.getenv("TWILIO_ACCOUNT_SID") and os.getenv("TWILIO_AUTH_TOKEN") and os.getenv("TWILIO_SMS_FROM"))
+    }
+
+@app.post("/voice-replies/generate")
+async def generate_voice_reply(payload:dict, request:Request, claims=Depends(current_claims)):
+    text_body=str(payload.get("text","")).strip()
+    path,filename=await elevenlabs_tts(text_body, payload.get("voice_id"))
+    base=os.getenv("PUBLIC_BASE_URL",str(request.base_url).rstrip("/"))
+    return {"audio_url":base+"/generated-audio/"+filename,"format":"ogg_opus","provider":"elevenlabs"}
+
+@app.get("/business/faqs")
+def list_business_faqs(claims=Depends(current_claims),db:Session=Depends(get_db)):
+    rows=db.query(BusinessFAQ).filter_by(workspace_id=claims["workspace"],enabled=True).order_by(BusinessFAQ.id.desc()).all()
+    return [{"id":r.id,"question":r.question,"answer":r.answer,"keywords":r.keywords} for r in rows]
+
+@app.post("/business/faqs")
+def create_business_faq(payload:dict,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    question=str(payload.get("question","")).strip()
+    answer=str(payload.get("answer","")).strip()
+    keywords=str(payload.get("keywords","")).strip()
+    if not question or not answer: raise HTTPException(400,"FAQ question and answer are required.")
+    if len(question)>1000 or len(answer)>3000 or len(keywords)>1000: raise HTTPException(400,"FAQ fields exceed allowed length.")
+    row=BusinessFAQ(workspace_id=claims["workspace"],question=question,answer=answer,keywords=keywords)
+    db.add(row);db.commit();db.refresh(row)
+    return {"id":row.id,"question":row.question,"answer":row.answer,"keywords":row.keywords}
+
+def find_faq_reply(workspace:str, incoming:str, db:Session):
+    rows=db.query(BusinessFAQ).filter_by(workspace_id=workspace,enabled=True).all()
+    normalized=incoming.lower()
+    for row in rows:
+        terms=[x.strip().lower() for x in row.keywords.replace(",", " ").split() if len(x.strip())>=3]
+        if terms and sum(1 for term in terms if term in normalized)>=max(1,min(2,len(terms))):
+            return row
+    return None
+
+@app.post("/inbox/conversations/{conversation_id}/ai-reply")
+async def run_hybrid_ai_reply(conversation_id:int, request:Request, claims=Depends(current_claims),db:Session=Depends(get_db)):
+    conv=db.query(Conversation).filter_by(id=conversation_id,workspace_id=claims["workspace"]).first()
+    if not conv: raise HTTPException(404,"Conversation not found")
+    incoming=db.query(Message).filter_by(conversation_id=conv.id,workspace_id=claims["workspace"],direction="inbound").order_by(Message.id.desc()).first()
+    if not incoming: raise HTTPException(400,"No inbound customer message to answer.")
+    faq=find_faq_reply(claims["workspace"],incoming.body,db)
+    if not faq:
+        return {"status":"needs_human_approval","reason":"No approved FAQ matched. Add an approved FAQ or have a staff member write and approve the answer.","customer_message":incoming.body}
+    answer=faq.answer
+    # Hybrid mode: only pre-approved FAQ answers can be sent automatically.
+    if conv.channel not in ("whatsapp","sms","webchat"):
+        return {"status":"needs_human_approval","reason":"This channel's outbound adapter is not enabled yet.","draft":answer}
+    path,filename=await elevenlabs_tts(answer)
+    base=os.getenv("PUBLIC_BASE_URL",str(request.base_url).rstrip("/"))
+    audio_url=base+"/generated-audio/"+filename
+    delivery=[]
+    if conv.channel in ("whatsapp","sms"):
+        text_result=await deliver_text(conv.channel,conv.customer_handle,answer)
+        delivery.append(text_result)
+    if conv.channel=="whatsapp":
+        voice_result=await deliver_whatsapp_voice(conv.customer_handle,path)
+        delivery.append(voice_result)
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status="sent",audio_url=audio_url)
+    conv.last_message=answer;conv.updated_at=datetime.now(timezone.utc)
+    db.add(msg);db.commit();db.refresh(msg)
+    await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
+    return {"status":"sent","mode":"hybrid_faq_auto","text":answer,"audio_url":audio_url,"delivery":delivery}
+
+@app.post("/inbox/conversations/{conversation_id}/send-voice-reply")
+async def send_approved_voice_reply(conversation_id:int,payload:dict,request:Request,claims=Depends(current_claims),db:Session=Depends(get_db)):
+    conv=db.query(Conversation).filter_by(id=conversation_id,workspace_id=claims["workspace"]).first()
+    if not conv: raise HTTPException(404,"Conversation not found")
+    answer=str(payload.get("text","")).strip()
+    if not answer or len(answer)>4000: raise HTTPException(400,"Approved reply must contain 1–4000 characters.")
+    path,filename=await elevenlabs_tts(answer)
+    base=os.getenv("PUBLIC_BASE_URL",str(request.base_url).rstrip("/"))
+    audio_url=base+"/generated-audio/"+filename
+    delivery=[]
+    if conv.channel in ("whatsapp","sms"):
+        delivery.append(await deliver_text(conv.channel,conv.customer_handle,answer))
+    if conv.channel=="whatsapp":
+        delivery.append(await deliver_whatsapp_voice(conv.customer_handle,path))
+    elif conv.channel not in ("sms","webchat"):
+        raise HTTPException(501,"This channel's outbound delivery adapter is not enabled. Reply was not sent.")
+    msg=Message(workspace_id=claims["workspace"],conversation_id=conv.id,direction="outbound",body=answer,delivery_status="sent" if conv.channel!="webchat" else "stored_in_webchat",audio_url=audio_url)
+    conv.last_message=answer;conv.updated_at=datetime.now(timezone.utc)
+    db.add(msg);db.commit();db.refresh(msg)
+    await broadcast(claims["workspace"],{"type":"inbox.message","conversation_id":conv.id,"message_id":msg.id})
+    return {"status":"sent","text":answer,"audio_url":audio_url,"delivery":delivery}
 
 \nSTATIC_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"static")
 @app.get("/",include_in_schema=False)
