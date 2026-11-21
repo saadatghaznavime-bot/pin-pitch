@@ -55,9 +55,9 @@ _whisper_compute_actual: Optional[str] = None
 def _public_answer(raw: str) -> str:
     """Remove Qwen/Ollama reasoning blocks before text reaches the UI or TTS."""
     answer = raw or ""
-    answer = re.sub(r"<think\\b[^>]*>.*?</think\\s*>", "", answer, flags=re.IGNORECASE | re.DOTALL)
-    answer = re.sub(r"<think\\b[^>]*>.*$", "", answer, flags=re.IGNORECASE | re.DOTALL)
-    answer = re.sub(r"</?think\\s*>", "", answer, flags=re.IGNORECASE)
+    answer = re.sub(r"<think[^>]*>.*?</think>", "", answer, flags=re.IGNORECASE | re.DOTALL)
+    answer = re.sub(r"<think[^>]*>.*$", "", answer, flags=re.IGNORECASE | re.DOTALL)
+    answer = re.sub(r"</?think>", "", answer, flags=re.IGNORECASE)
     return answer.strip()
 
 
