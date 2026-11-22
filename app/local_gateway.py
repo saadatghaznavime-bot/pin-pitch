@@ -29,14 +29,14 @@ from pydantic import BaseModel, Field
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-PIPER_MODEL = os.getenv("PIPER_MODEL", "")
-PIPER_VOICE_DIR = Path(os.getenv("PIPER_VOICE_DIR", str(Path.home() / ".local" / "share" / "piper" / "voices"))).expanduser()
-DEFAULT_PIPER_VOICE = os.getenv("PIPER_DEFAULT_VOICE", "en_US-amy-medium")
+KOKORO_MODEL_PATH = Path(os.getenv("KOKORO_MODEL_PATH", str(Path.home() / ".local" / "share" / "kokoro" / "kokoro-v1.0.onnx"))).expanduser()
+KOKORO_VOICES_PATH = Path(os.getenv("KOKORO_VOICES_PATH", str(Path.home() / ".local" / "share" / "kokoro" / "voices-v1.0.bin"))).expanduser()
+DEFAULT_KOKORO_VOICE = os.getenv("KOKORO_DEFAULT_VOICE", "af_heart")
 
-PIPER_VOICE_CATALOG = {
-    "en_US-amy-medium": {"name": "Amy", "gender": "female", "accent": "American English", "style": "Calm & premium"},
-    "en_US-kristin-medium": {"name": "Kristin", "gender": "female", "locale": "American English", "style": "Friendly"},
-    "en_US-ryan-medium": {"name": "Ryan", "gender": "male", "locale": "American English", "style": "Professional"},
+KOKORO_VOICE_CATALOG = {
+    "af_heart": {"name": "Heart", "gender": "female", "accent": "American English", "style": "Warm & expressive"},
+    "af_jessica": {"name": "Jessica", "gender": "female", "accent": "American English", "style": "Conversational"},
+    "am_eric": {"name": "Eric", "gender": "male", "accent": "American English", "style": "Friendly & confident"},
 }
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
@@ -61,7 +61,7 @@ app.add_middleware(
 )
 
 _whisper_model = None
-_piper_voices: dict[str, object] = {}
+_kokoro_engine = None
 _whisper_device_actual: Optional[str] = None
 _whisper_compute_actual: Optional[str] = None
 API_TOKEN = os.getenv("LOCAL_AI_API_TOKEN", "").strip()
@@ -144,7 +144,7 @@ async def health():
         "network_scope": "loopback-only; do not expose publicly",
         "ollama": ollama,
         "whisper": {"installed": _whisper_model is not None, "configured_model": WHISPER_MODEL, "configured_device": WHISPER_DEVICE, "actual_device": _whisper_device_actual},
-        "piper": {"configured": bool(_piper_voice_path(DEFAULT_PIPER_VOICE)), "default_voice": DEFAULT_PIPER_VOICE, "voices": _piper_voice_status()},
+        "piper": {"configured": _kokoro_files_available(), "engine": "kokoro-onnx", "default_voice": DEFAULT_KOKORO_VOICE, "voices": _kokoro_voice_status()},
         "gpu": _gpu_info(),
     }
 
@@ -236,41 +236,55 @@ async def transcribe(audio: UploadFile = File(...)):
                 pass
 
 
-def _piper_voice_path(voice_id: str) -> Optional[Path]:
-    """Resolve only known voice IDs to local model files; never accept arbitrary paths."""
-    if voice_id not in PIPER_VOICE_CATALOG:
-        return None
-    candidate = PIPER_VOICE_DIR / (voice_id + ".onnx")
-    if candidate.is_file():
-        return candidate.resolve()
-    if voice_id == DEFAULT_PIPER_VOICE and PIPER_MODEL:
-        legacy = Path(PIPER_MODEL).expanduser()
-        if legacy.is_file() and legacy.name == voice_id + ".onnx":
-            return legacy.resolve()
-    return None
+def _kokoro_files_available() -> bool:
+    return KOKORO_MODEL_PATH.is_file() and KOKORO_VOICES_PATH.is_file()
 
 
+def _kokoro_voice_status() -> list[dict]:
+    ready = _kokoro_files_available()
+    return [{**details, "id": voice_id, "available": ready} for voice_id, details in KOKORO_VOICE_CATALOG.items()]
 
-def _synthesize_piper_wav(text: str, voice_id: str, model_path: Path) -> bytes:
-    """Synthesize WAV directly through Piper's Python API; no unsigned CLI executable."""
-    voice = _piper_voices.get(voice_id)
-    if voice is None:
-        from piper import PiperVoice
-        voice = PiperVoice.load(str(model_path))
-        _piper_voices[voice_id] = voice
 
+def _load_kokoro():
+    global _kokoro_engine
+    if _kokoro_engine is not None:
+        return _kokoro_engine
+    if not _kokoro_files_available():
+        raise HTTPException(
+            503,
+            "Kokoro model files are missing. Install kokoro-v1.0.onnx and voices-v1.0.bin in " + str(KOKORO_MODEL_PATH.parent) + ".",
+        )
+    try:
+        from kokoro_onnx import Kokoro
+    except ImportError:
+        raise HTTPException(503, "Kokoro is not installed. Run pip install -r requirements-local.txt.")
+    try:
+        _kokoro_engine = Kokoro(str(KOKORO_MODEL_PATH), str(KOKORO_VOICES_PATH))
+        return _kokoro_engine
+    except Exception as exc:
+        raise HTTPException(503, f"Could not load Kokoro model: {type(exc).__name__}")
+
+
+def _synthesize_kokoro_wav(text: str, voice_id: str) -> bytes:
+    import io
+    import soundfile as sf
+
+    engine = _load_kokoro()
+    samples, sample_rate = engine.create(text, voice=voice_id, speed=1.0, lang="en-us")
     buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wav_file:
-        voice.synthesize_wav(text, wav_file)
+    sf.write(buffer, samples, sample_rate, format="WAV", subtype="PCM_16")
     return buffer.getvalue()
-
-def _piper_voice_status() -> list[dict]:
-    return [{**details, "id": voice_id, "available": bool(_piper_voice_path(voice_id))} for voice_id, details in PIPER_VOICE_CATALOG.items()]
 
 
 @app.get("/voices", dependencies=[Depends(_security_guard)])
 async def list_voices():
-    return {"default_voice": DEFAULT_PIPER_VOICE, "voices": _piper_voice_status(), "voice_directory": str(PIPER_VOICE_DIR)}
+    return {
+        "engine": "kokoro-onnx",
+        "default_voice": DEFAULT_KOKORO_VOICE,
+        "voices": _kokoro_voice_status(),
+        "model_path": str(KOKORO_MODEL_PATH),
+        "voice_data_path": str(KOKORO_VOICES_PATH),
+    }
 
 
 @app.post("/speak", dependencies=[Depends(_security_guard)])
@@ -278,22 +292,21 @@ async def speak(payload: dict):
     text = str(payload.get("text", "")).strip()
     if not text or len(text) > 4000:
         raise HTTPException(400, "Text must contain 1–4000 characters.")
-    voice_id = str(payload.get("voice", DEFAULT_PIPER_VOICE))
-    model_path = _piper_voice_path(voice_id)
-    if not model_path:
-        raise HTTPException(503, "Piper voice is not installed. Install its .onnx and .onnx.json files in " + str(PIPER_VOICE_DIR) + ".")
+    voice_id = str(payload.get("voice", DEFAULT_KOKORO_VOICE))
+    if voice_id not in KOKORO_VOICE_CATALOG:
+        raise HTTPException(400, "Unsupported Kokoro voice.")
     try:
         audio_bytes = await asyncio.wait_for(
-            asyncio.to_thread(_synthesize_piper_wav, text, voice_id, model_path),
-            timeout=60,
+            asyncio.to_thread(_synthesize_kokoro_wav, text, voice_id),
+            timeout=90,
         )
         return Response(content=audio_bytes, media_type="audio/wav", headers={"X-PINPITCH-VOICE": voice_id, "Cache-Control": "no-store"})
     except asyncio.TimeoutError:
-        raise HTTPException(504, "Piper synthesis timed out.")
-    except ImportError:
-        raise HTTPException(503, "Piper Python package is not installed. Install requirements-local.txt.")
+        raise HTTPException(504, "Kokoro synthesis timed out.")
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(502, f"Piper synthesis failed: {type(exc).__name__}: {str(exc)[:240]}")
+        raise HTTPException(502, f"Kokoro synthesis failed: {type(exc).__name__}: {str(exc)[:240]}")
 
 
 if __name__ == "__main__":
