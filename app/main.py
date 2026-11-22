@@ -78,7 +78,13 @@ def update_agent(agent_id:int,data:AgentIn,claims=Depends(current_claims),db:Ses
 def delete_agent(agent_id:int,claims=Depends(current_claims),db:Session=Depends(get_db)):
     agent=db.query(Agent).filter(Agent.id==agent_id,Agent.workspace_id==claims["workspace"]).first()
     if not agent: raise HTTPException(404,"Agent not found")
-    db.delete(agent); db.commit(); return {"deleted":True}
+    # Remove dependent conversation turns and sessions before deleting the agent.
+    sessions=db.query(AgentSession).filter(AgentSession.agent_id==agent_id,AgentSession.workspace_id==claims["workspace"]).all()
+    session_ids=[session.id for session in sessions]
+    if session_ids:
+        db.query(AgentSessionTurn).filter(AgentSessionTurn.session_id.in_(session_ids),AgentSessionTurn.workspace_id==claims["workspace"]).delete(synchronize_session=False)
+        db.query(AgentSession).filter(AgentSession.id.in_(session_ids),AgentSession.workspace_id==claims["workspace"]).delete(synchronize_session=False)
+    db.delete(agent); db.commit(); return {"deleted":True,"deleted_sessions":len(session_ids)}
 
 def run_demo_call(direction:str,data:DemoCallIn,claims,db:Session):
     agent=db.query(Agent).filter(Agent.id==data.agent_id,Agent.workspace_id==claims["workspace"]).first()
