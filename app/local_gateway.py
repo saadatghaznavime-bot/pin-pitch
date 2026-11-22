@@ -28,6 +28,8 @@ from pydantic import BaseModel, Field
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 PIPER_MODEL = os.getenv("PIPER_MODEL", "")
+PIPER_VOICE_DIR = Path(os.getenv("PIPER_VOICE_DIR", str(Path.home() / ".local" / "share" / "piper" / "voices"))).expanduser()
+DEFAULT_PIPER_VOICE = os.getenv("PIPER_DEFAULT_VOICE", "en_US-amy-medium")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
