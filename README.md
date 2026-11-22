@@ -8,7 +8,7 @@ PIN&PITCH is a workspace-scoped communications demo. It includes account/workspa
 - Simulated calls, conversations and replies are PIN&PITCH database records. They do not place calls or deliver messages.
 - Outbound SMS, WhatsApp, social messaging, OpenAI Realtime and paid voice providers are disabled in the demo backend.
 - Inbox replies are saved with the status `saved_demo_only`; they are not sent externally.
-- Optional local AI runs on the Windows PC using Ollama, faster-whisper and Piper. It does not require paid API keys.
+- Optional local AI runs on the Windows PC using Ollama, faster-whisper and Kokoro. It does not require paid API keys.
 - Do not enter real customer data, payment details or sensitive information in this demo.
 
 ## Run the web application locally
@@ -55,7 +55,7 @@ In the activated project environment:
 pip install -r requirements-local.txt
 ```
 
-This installs faster-whisper, Piper TTS and multipart upload support. Create `~/.local/share/piper/voices` inside WSL and place both `en_US-amy-medium.onnx` and its matching `.onnx.json` file there, downloaded from the official Piper voices collection. Check the model licence before redistribution. The default is a female American English voice selected as the calm/premium starting point.
+This installs faster-whisper, Kokoro ONNX TTS and multipart upload support. Create `~/.local/share/piper/voices` inside WSL and place both `en_US-amy-medium.onnx` and its matching `.onnx.json` file there, downloaded from the official Kokoro voices collection. Check the model licence before redistribution. The default is a female American English voice selected as the calm/premium starting point.
 
 ### 3. Start the local gateway
 
@@ -94,8 +94,8 @@ Available endpoints:
 | `GET /health` | Ollama, model, speech and NVIDIA GPU diagnostics |
 | `POST /chat` | Local Qwen chat via Ollama |
 | `POST /transcribe` | Local faster-whisper transcription |
-| `GET /voices` | List supported local Piper voices and installation status |
-| `POST /speak` | Local Piper WAV generation using a selected voice ID |
+| `GET /voices` | List supported local Kokoro voices and installation status |
+| `POST /speak` | Local Kokoro WAV generation using a selected voice ID |
 
 The first Whisper transcription downloads the selected model. Start with CPU transcription to avoid CUDA setup and GPU memory contention. For GPU transcription on Windows, faster-whisper requires compatible CUDA 12 cuBLAS and cuDNN 9 runtime libraries. If CUDA initialization fails, configure `WHISPER_DEVICE=cpu`. The gateway reports its actual Whisper device after initialization.
 
@@ -122,8 +122,23 @@ If `requirements-dev.txt` is not present in the current branch yet, install pyte
 
 ## Current limitations
 
-- The agent conversation panel can use the local Ollama gateway for chat, faster-whisper for recorded browser microphone transcription, and Piper for speech output when each local component is installed. If the gateway or model is unavailable, the hosted backend stores an approved-FAQ answer or a clearly labeled safe fallback.
-- Ollama, the Qwen model, faster-whisper, Piper and a licensed Piper voice must be installed and verified on the Windows PC.
+- The agent conversation panel can use the local Ollama gateway for chat, faster-whisper for recorded browser microphone transcription, and Kokoro for speech output when each local component is installed. If the gateway or model is unavailable, the hosted backend stores an approved-FAQ answer or a clearly labeled safe fallback.
+- Ollama, the Qwen model, faster-whisper, Kokoro and a licensed Kokoro voice must be installed and verified on the Windows PC.
 - Local browser-to-gateway integration must be tested in the target browser; hosted HTTPS pages may be restricted from accessing loopback HTTP services.
 - Calls and messages are simulations only. No carrier, SMS, WhatsApp, social platform, external calendar or production telephony provider is connected.
 - SQLite is suitable for this demo, not multi-instance production.
+
+
+## Kokoro local voices (Windows)
+
+The local gateway uses Kokoro ONNX for speech generation. Install local dependencies with:
+
+```powershell
+python -m pip install -r requirements-local.txt
+```
+
+Download the official Kokoro ONNX model and voice bundle from the upstream model release:
+- `kokoro-v1.0.onnx`
+- `voices-v1.0.bin`
+
+Place both files in `$HOME\.local\share\kokoro\` (create the folder if needed). The gateway's selected voice presets are `af_heart`, `af_jessica`, and `am_eric`. They are assigned per agent through the existing Agent voice field. Kokoro runs locally; no paid speech API is used. The gateway loads the ONNX model lazily on the first preview or speech request.
