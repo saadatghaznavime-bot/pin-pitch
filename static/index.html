@@ -271,8 +271,7 @@ function speakDemoAnswer(answer){
 }
 
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-// Replace the prototype's local-only agent creation with authenticated API persistence.
-createAgent=async function(){let n=document.getElementById('agentName').value.trim(),purpose=document.getElementById('agentPurpose').value.trim();if(!n){toast('Please enter an agent name');return}try{await api('/agents',{method:'POST',body:JSON.stringify({name:n,instructions:purpose,voice:'alloy',enabled:false})});toast('Agent draft saved');await refreshAgents();go('agents')}catch(e){toast(e.message)}};
+// Agent creation is handled by the voice-aware createAgent() function above.
 // Gate the app until a demo workspace session exists.
 if(accessToken){api('/me').then(()=>{document.getElementById('authGate').style.display='none';connectEvents();refreshAgents();refreshCalls();loadInboxChannels();loadInbox();loadVoiceReplyStatus();refreshContacts();refreshAppointments();loadAnalytics()}).catch(()=>{accessToken='';localStorage.removeItem('pp_token')})}
 
