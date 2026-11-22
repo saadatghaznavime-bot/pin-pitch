@@ -136,7 +136,7 @@
       piperVoices = data.voices || [];
       const select = $("talkVoice");
       const selected = currentVoice();
-      select.innerHTML = piperVoices.map(v => '<option value="' + escapeHtml(v.id) + '">' + escapeHtml(v.label) + (v.available ? "" : " · not installed") + '</option>').join("");
+      select.innerHTML = piperVoices.map(v => { const name = v.label || v.name || v.id || "Unknown voice"; const gender = v.gender ? v.gender.charAt(0).toUpperCase() + v.gender.slice(1) : ""; const locale = v.locale || v.accent || ""; const style = v.style || ""; const details = [gender, locale, style].filter(Boolean).join(" · "); const label = details ? name + " · " + details : name; return '<option value="' + escapeHtml(v.id) + '">' + escapeHtml(label) + (v.available ? "" : " · not installed") + '</option>'; }).join("");
       select.value = piperVoices.some(v => v.id === selected) ? selected : defaultVoice;
       const active = piperVoices.find(v => v.id === select.value);
       $("voiceSetupNote").textContent = active?.available ? "Ready · speech is generated locally on this PC." : "Install the selected Piper .onnx voice and matching .onnx.json file to enable local playback.";
