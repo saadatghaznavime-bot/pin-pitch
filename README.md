@@ -55,7 +55,7 @@ In the activated project environment:
 pip install -r requirements-local.txt
 ```
 
-This installs faster-whisper, Piper TTS and multipart upload support. Download a Piper voice model from the official voice repository and note the full path to its `.onnx` file. Check the model's licence before redistribution.
+This installs faster-whisper, Piper TTS and multipart upload support. Create `~/.local/share/piper/voices` inside WSL and place both `en_US-amy-medium.onnx` and its matching `.onnx.json` file there, downloaded from the official Piper voices collection. Check the model licence before redistribution. The default is a female American English voice selected as the calm/premium starting point.
 
 ### 3. Start the local gateway
 
@@ -73,7 +73,7 @@ $env:LOCAL_AI_API_TOKEN
 python -m app.local_gateway
 ```
 
-The gateway health endpoint is http://127.0.0.1:8765/health. Paste the generated token into the Local gateway security token field in the PIN&PITCH agent panel and select Unlock local AI. The token is kept in that browser tab session storage and cleared when the tab session ends.
+The gateway health endpoint is http://127.0.0.1:8765/health. The authenticated `GET /voices` endpoint lists supported local presets and whether their model files are installed. `POST /speak` accepts text and a voice ID; only known voice IDs are resolved inside the local voice directory. The selected voice is saved in this browser on this device, per agent. Paste the generated token into the Local gateway security token field in the PIN&PITCH agent panel and select Unlock local AI. The token is kept in that browser tab session storage and cleared when the tab session ends.
 
 ### Local gateway security controls
 
@@ -94,7 +94,8 @@ Available endpoints:
 | `GET /health` | Ollama, model, speech and NVIDIA GPU diagnostics |
 | `POST /chat` | Local Qwen chat via Ollama |
 | `POST /transcribe` | Local faster-whisper transcription |
-| `POST /speak` | Local Piper WAV generation |
+| `GET /voices` | List supported local Piper voices and installation status |
+| `POST /speak` | Local Piper WAV generation using a selected voice ID |
 
 The first Whisper transcription downloads the selected model. Start with CPU transcription to avoid CUDA setup and GPU memory contention. For GPU transcription on Windows, faster-whisper requires compatible CUDA 12 cuBLAS and cuDNN 9 runtime libraries. If CUDA initialization fails, configure `WHISPER_DEVICE=cpu`. The gateway reports its actual Whisper device after initialization.
 
