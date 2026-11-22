@@ -10,10 +10,10 @@
       <div><div class="eyebrow">LOCAL AI · ZERO API COST</div><h2 style="font-size:18px;margin:5px 0">Talk to your agent</h2></div>
       <span class="status" id="voiceState">Checking local AI…</span>
     </div>
-    <p class="muted">Uses your local Ollama model, faster-whisper and Piper when installed. Conversations are saved in your PIN&PITCH workspace.</p>
+    <p class="muted">Uses your local Ollama model, faster-whisper and Kokoro when installed. Conversations are saved in your PIN&PITCH workspace.</p>
     <label class="field"><span>Local gateway security token</span><input id="localGatewayToken" type="password" autocomplete="off" placeholder="Paste your LOCAL_AI_API_TOKEN"></label><button class="ghost" id="unlockLocalGateway" style="width:100%;margin-bottom:10px">Unlock local AI</button>
     <label class="field"><span>Select agent</span><select id="talkAgent" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"></select></label>
-    <label class="field"><span>Agent voice · local Piper</span><select id="talkVoice" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="en_US-amy-medium">Amy · Female · American · Calm & premium</option></select></label>
+    <label class="field"><span>Agent voice · local Kokoro</span><select id="talkVoice" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="af_heart">Amy · Female · American · Calm & premium</option></select></label>
     <button class="ghost" id="previewAgentVoice" style="width:100%;margin-bottom:10px">▶ Preview voice</button>
     <p class="muted" id="voiceSetupNote" style="margin-top:-4px">Voice preview requires the local Piper voice model to be installed.</p><label class="field"><span>Saved conversations</span><select id="savedAgentSessions" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="">No saved conversations loaded</option></select></label><button class="ghost" id="loadSavedSession" style="width:100%;margin-bottom:8px">Load selected conversation</button>
     <div id="talkTranscript" style="min-height:64px;max-height:220px;overflow:auto;background:#fff6f0;border-radius:12px;padding:10px;font-size:12px;color:#555;margin:12px 0">Your saved conversation will appear here.</div>
@@ -37,7 +37,7 @@
   $("localGatewayToken").value = gatewayToken;
   let agents = [], savedSessions = [], activeSessionId = null, activeAgentId = null, history = [];
   let mediaRecorder = null, mediaStream = null, audioChunks = [], listening = false;
-  let piperVoices = [];
+  let kokoroVoices = [];
   const defaultVoice = "en_US-amy-medium";
 
   function log(who, text) {
@@ -139,7 +139,7 @@
       select.innerHTML = piperVoices.map(v => { const name = v.label || v.name || v.id || "Unknown voice"; const gender = v.gender ? v.gender.charAt(0).toUpperCase() + v.gender.slice(1) : ""; const locale = v.locale || v.accent || ""; const style = v.style || ""; const details = [gender, locale, style].filter(Boolean).join(" · "); const label = details ? name + " · " + details : name; return '<option value="' + escapeHtml(v.id) + '">' + escapeHtml(label) + (v.available ? "" : " · not installed") + '</option>'; }).join("");
       select.value = piperVoices.some(v => v.id === selected) ? selected : defaultVoice;
       const active = piperVoices.find(v => v.id === select.value);
-      $("voiceSetupNote").textContent = active?.available ? "Ready · speech is generated locally on this PC." : "Install the selected Piper .onnx voice and matching .onnx.json file to enable local playback.";
+      $("voiceSetupNote").textContent = active?.available ? "Ready · speech is generated locally on this PC." : "Install the selected Kokoro model and voice data files to enable local playback.";
     } catch { $("voiceSetupNote").textContent = "Unlock the local gateway to load available Piper voices."; }
   }
 
