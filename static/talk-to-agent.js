@@ -13,9 +13,9 @@
     <p class="muted">Uses your local Ollama model, faster-whisper and Kokoro when installed. Conversations are saved in your PIN&PITCH workspace.</p>
     <label class="field"><span>Local gateway security token</span><input id="localGatewayToken" type="password" autocomplete="off" placeholder="Paste your LOCAL_AI_API_TOKEN"></label><button class="ghost" id="unlockLocalGateway" style="width:100%;margin-bottom:10px">Unlock local AI</button>
     <label class="field"><span>Select agent</span><select id="talkAgent" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"></select></label>
-    <label class="field"><span>Agent voice · local Kokoro</span><select id="talkVoice" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="af_heart">Amy · Female · American · Calm & premium</option></select></label>
+    <label class="field"><span>Agent voice · local Kokoro</span><select id="talkVoice" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="af_heart">Heart · Female · American English · Warm & expressive</option></select></label>
     <button class="ghost" id="previewAgentVoice" style="width:100%;margin-bottom:10px">▶ Preview voice</button>
-    <p class="muted" id="voiceSetupNote" style="margin-top:-4px">Voice preview requires the local Piper voice model to be installed.</p><label class="field"><span>Saved conversations</span><select id="savedAgentSessions" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="">No saved conversations loaded</option></select></label><button class="ghost" id="loadSavedSession" style="width:100%;margin-bottom:8px">Load selected conversation</button>
+    <p class="muted" id="voiceSetupNote" style="margin-top:-4px">Voice preview requires the local Kokoro voice model to be installed.</p><label class="field"><span>Saved conversations</span><select id="savedAgentSessions" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="">No saved conversations loaded</option></select></label><button class="ghost" id="loadSavedSession" style="width:100%;margin-bottom:8px">Load selected conversation</button>
     <div id="talkTranscript" style="min-height:64px;max-height:220px;overflow:auto;background:#fff6f0;border-radius:12px;padding:10px;font-size:12px;color:#555;margin:12px 0">Your saved conversation will appear here.</div>
     <label class="field"><span>Or type a message</span><input id="freeVoiceText" type="text" placeholder="Ask about hours, pricing, bookings…"></label>
     <div style="display:flex;gap:8px">
@@ -38,7 +38,7 @@
   let agents = [], savedSessions = [], activeSessionId = null, activeAgentId = null, history = [];
   let mediaRecorder = null, mediaStream = null, audioChunks = [], listening = false;
   let kokoroVoices = [];
-  const defaultVoice = "en_US-amy-medium";
+  const defaultVoice = "af_heart";
 
   function log(who, text) {
     const box = $("talkTranscript");
@@ -60,7 +60,7 @@
       const whisper = health.whisper?.installed;
       const piper = health.piper?.configured;
       state(model ? "Local model ready" : "Local AI needs setup");
-      await loadPiperVoices();
+      await loadKokoroVoices();
       return { online: true, model, whisper, piper };
     } catch {
       state("FAQ fallback · gateway offline");
@@ -125,27 +125,27 @@
   function currentVoice() {
     const agentId = String($("talkAgent").value || "");
     const selected = agents.find(agent => String(agent.id) === agentId);
-    return selected?.voice || defaultVoice;
+    return selected?.voice && kokoroVoices.some(item => item.id === selected.voice) ? selected.voice : defaultVoice;
   }
 
-  async function loadPiperVoices() {
+  async function loadKokoroVoices() {
     try {
       const response = await fetch(GATEWAY + "/voices", { cache: "no-store", headers: gatewayHeaders() });
       if (!response.ok) throw new Error("Voice list unavailable");
       const data = await response.json();
-      piperVoices = data.voices || [];
+      kokoroVoices = data.voices || [];
       const select = $("talkVoice");
       const selected = currentVoice();
-      select.innerHTML = piperVoices.map(v => { const name = v.label || v.name || v.id || "Unknown voice"; const gender = v.gender ? v.gender.charAt(0).toUpperCase() + v.gender.slice(1) : ""; const locale = v.locale || v.accent || ""; const style = v.style || ""; const details = [gender, locale, style].filter(Boolean).join(" · "); const label = details ? name + " · " + details : name; return '<option value="' + escapeHtml(v.id) + '">' + escapeHtml(label) + (v.available ? "" : " · not installed") + '</option>'; }).join("");
-      select.value = piperVoices.some(v => v.id === selected) ? selected : defaultVoice;
-      const active = piperVoices.find(v => v.id === select.value);
+      select.innerHTML = kokoroVoices.map(v => { const name = v.label || v.name || v.id || "Unknown voice"; const gender = v.gender ? v.gender.charAt(0).toUpperCase() + v.gender.slice(1) : ""; const locale = v.locale || v.accent || ""; const style = v.style || ""; const details = [gender, locale, style].filter(Boolean).join(" · "); const label = details ? name + " · " + details : name; return '<option value="' + escapeHtml(v.id) + '">' + escapeHtml(label) + (v.available ? "" : " · not installed") + '</option>'; }).join("");
+      select.value = kokoroVoices.some(v => v.id === selected) ? selected : defaultVoice;
+      const active = kokoroVoices.find(v => v.id === select.value);
       $("voiceSetupNote").textContent = active?.available ? "Ready · speech is generated locally on this PC." : "Install the selected Kokoro model and voice data files to enable local playback.";
-    } catch { $("voiceSetupNote").textContent = "Unlock the local gateway to load available Piper voices."; }
+    } catch { $("voiceSetupNote").textContent = "Unlock the local gateway to load available Kokoro voices."; }
   }
 
   async function previewVoice() {
     const voice = currentVoice();
-    const chosen = piperVoices.find(item => item.id === voice);
+    const chosen = kokoroVoices.find(item => item.id === voice);
     if (chosen && !chosen.available) {
       state("Voice model not installed");
       $("voiceSetupNote").textContent = "This voice is selected, but its local model files are not installed yet.";
@@ -162,7 +162,7 @@
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || "Piper voice preview failed.");
+        throw new Error(data.detail || "Kokoro voice preview failed.");
       }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -170,7 +170,7 @@
       audio.onended = () => URL.revokeObjectURL(url);
       audio.onerror = () => URL.revokeObjectURL(url);
       await audio.play();
-      state("Playing local Piper preview");
+      state("Playing local Kokoro preview");
     } catch (error) {
       state("Voice preview unavailable");
       $("voiceSetupNote").textContent = error.message;
@@ -183,7 +183,7 @@
         method: "POST", headers: gatewayHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ text: text, voice: currentVoice() })
       });
-      if (!response.ok) throw new Error("Piper not ready");
+      if (!response.ok) throw new Error("Kokoro not ready");
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
@@ -314,8 +314,8 @@
     try {
       const saved = await api("/agents/" + agentId, { method: "PATCH", body: JSON.stringify({ name: agent.name, instructions: agent.instructions || "", voice, enabled: agent.enabled }) });
       agents = agents.map(item => item.id === saved.id ? saved : item);
-      const chosen = piperVoices.find(item => item.id === voice);
-      $("voiceSetupNote").textContent = chosen?.available ? "Saved to this agent · ready for local preview." : "Saved to this agent · install this Piper voice model locally before previewing.";
+      const chosen = kokoroVoices.find(item => item.id === voice);
+      $("voiceSetupNote").textContent = chosen?.available ? "Saved to this agent · ready for local preview." : "Saved to this agent · install this Kokoro voice model locally before previewing.";
       state("Agent voice saved");
       if (typeof window.refreshAgents === "function") await window.refreshAgents();
     } catch (error) { state("Could not save agent voice"); $("voiceSetupNote").textContent = error.message; syncAgentVoice(); }
@@ -335,8 +335,8 @@
   function syncAgentVoice() {
     const voice = currentVoice();
     if ($("talkVoice").options.length) $("talkVoice").value = voice;
-    const selected = piperVoices.find(item => item.id === voice);
-    if (selected) $("voiceSetupNote").textContent = selected.available ? "Saved for this agent · local playback ready." : "Saved for this agent · install the selected Piper voice files to preview.";
+    const selected = kokoroVoices.find(item => item.id === voice);
+    if (selected) $("voiceSetupNote").textContent = selected.available ? "Saved for this agent · local playback ready." : "Saved for this agent · install the selected Kokoro voice files to preview.";
   }
   $("talkAgent").addEventListener("change", () => {
     activeSessionId = null; activeAgentId = null; history = [];
