@@ -39,9 +39,6 @@
   let mediaRecorder = null, mediaStream = null, audioChunks = [], listening = false;
   let piperVoices = [];
   const defaultVoice = "en_US-amy-medium";
-  const voiceByAgentKey = "pinpitch_agent_voices";
-  let agentVoices = {};
-  try { agentVoices = JSON.parse(localStorage.getItem(voiceByAgentKey) || "{}"); } catch { agentVoices = {}; }
 
   function log(who, text) {
     const box = $("talkTranscript");
@@ -78,6 +75,7 @@
         `<option value="${a.id}">${escapeHtml(a.name)}${a.enabled ? "" : " (draft)"}</option>`
       ).join("") || '<option value="">Create an agent first</option>';
       $("talkStart").disabled = agents.length === 0;
+      syncAgentVoice();
       if (agents.length) await checkGateway();
       await loadSavedSessions();
     } catch (e) { state(e.message); }
@@ -126,7 +124,8 @@
 
   function currentVoice() {
     const agentId = String($("talkAgent").value || "");
-    return agentVoices[agentId] || defaultVoice;
+    const selected = agents.find(agent => String(agent.id) === agentId);
+    return selected?.voice || defaultVoice;
   }
 
   async function loadPiperVoices() {
@@ -145,7 +144,7 @@
   }
 
   async function previewVoice() {
-    const voice = $("talkVoice").value || defaultVoice;
+    const voice = currentVoice();
     const chosen = piperVoices.find(item => item.id === voice);
     if (chosen && !chosen.available) {
       state("Voice model not installed");
@@ -307,11 +306,19 @@
   $("unlockLocalGateway").addEventListener("click", async () => { gatewayToken = $("localGatewayToken").value.trim(); if (gatewayToken.length < 32) { state("Token must be at least 32 characters"); return; } sessionStorage.setItem(gatewayTokenKey, gatewayToken); await checkGateway(); });
   $("loadSavedSession").addEventListener("click", loadSelectedSession);
   $("previewAgentVoice").addEventListener("click", previewVoice);
-  $("talkVoice").addEventListener("change", () => {
-    const agentId = String($("talkAgent").value || "");
-    if (agentId) { agentVoices[agentId] = $("talkVoice").value; localStorage.setItem(voiceByAgentKey, JSON.stringify(agentVoices)); }
-    const chosen = piperVoices.find(item => item.id === $("talkVoice").value);
-    $("voiceSetupNote").textContent = chosen?.available ? "Ready · speech is generated locally on this PC." : "Install this voice model locally before previewing.";
+  $("talkVoice").addEventListener("change", async () => {
+    const agentId = Number($("talkAgent").value || 0);
+    const agent = agents.find(item => item.id === agentId);
+    if (!agent) return;
+    const voice = $("talkVoice").value || defaultVoice;
+    try {
+      const saved = await api("/agents/" + agentId, { method: "PATCH", body: JSON.stringify({ name: agent.name, instructions: agent.instructions || "", voice, enabled: agent.enabled }) });
+      agents = agents.map(item => item.id === saved.id ? saved : item);
+      const chosen = piperVoices.find(item => item.id === voice);
+      $("voiceSetupNote").textContent = chosen?.available ? "Saved to this agent · ready for local preview." : "Saved to this agent · install this Piper voice model locally before previewing.";
+      state("Agent voice saved");
+      if (typeof window.refreshAgents === "function") await window.refreshAgents();
+    } catch (error) { state("Could not save agent voice"); $("voiceSetupNote").textContent = error.message; syncAgentVoice(); }
   });
   $("talkStart").addEventListener("click", startRecording);
   $("talkStop").addEventListener("click", stopRecording);
@@ -325,10 +332,16 @@
       input.value = ""; answer(value);
     }
   });
+  function syncAgentVoice() {
+    const voice = currentVoice();
+    if ($("talkVoice").options.length) $("talkVoice").value = voice;
+    const selected = piperVoices.find(item => item.id === voice);
+    if (selected) $("voiceSetupNote").textContent = selected.available ? "Saved for this agent · local playback ready." : "Saved for this agent · install the selected Piper voice files to preview.";
+  }
   $("talkAgent").addEventListener("change", () => {
     activeSessionId = null; activeAgentId = null; history = [];
     $("talkTranscript").textContent = "Agent changed · a new saved conversation will start with your next message.";
-    $("talkVoice").value = currentVoice();
+    syncAgentVoice();
   });
   loadAgents();
   const originalRefresh = window.refreshAgents;
