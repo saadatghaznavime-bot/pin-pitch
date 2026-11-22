@@ -41,8 +41,8 @@ Install Ollama for Windows from https://ollama.com/download/windows. Then run:
 
 ```powershell
 ollama --version
-ollama pull qwen3:4b
-ollama run qwen3:4b
+ollama pull qwen2.5:3b
+ollama run qwen2.5:3b
 ```
 
 Exit the model prompt with `/bye`. Ollama should remain running in the background.
@@ -55,13 +55,13 @@ In the activated project environment:
 pip install -r requirements-local.txt
 ```
 
-This installs faster-whisper, Kokoro ONNX TTS and multipart upload support. Create `~/.local/share/piper/voices` inside WSL and place both `en_US-amy-medium.onnx` and its matching `.onnx.json` file there, downloaded from the official Kokoro voices collection. Check the model licence before redistribution. The default is a female American English voice selected as the calm/premium starting point.
+This installs faster-whisper, Kokoro ONNX TTS and multipart upload support. Kokoro uses one ONNX model file plus one voice-embedding bundle; the three selected voice IDs are included in that bundle. Download the two files in the Kokoro section below and place them in `$HOME\.local\share\kokoro\`.
 
 ### 3. Start the local gateway
 
 ```powershell
 $env:OLLAMA_URL = "http://127.0.0.1:11434"
-$env:OLLAMA_MODEL = "qwen3:4b"
+$env:OLLAMA_MODEL = "qwen2.5:3b"
 $env:WHISPER_MODEL = "small"
 $env:WHISPER_DEVICE = "cpu"
 $env:WHISPER_COMPUTE_TYPE = "int8"
@@ -73,7 +73,7 @@ $env:LOCAL_AI_API_TOKEN
 python -m app.local_gateway
 ```
 
-The gateway health endpoint is http://127.0.0.1:8765/health. The authenticated `GET /voices` endpoint lists supported local presets and whether their model files are installed. `POST /speak` accepts text and a voice ID; only known voice IDs are resolved inside the local voice directory. The selected voice is saved in this browser on this device, per agent. Paste the generated token into the Local gateway security token field in the PIN&PITCH agent panel and select Unlock local AI. The token is kept in that browser tab session storage and cleared when the tab session ends.
+The gateway health endpoint is http://127.0.0.1:8765/health. The authenticated `GET /voices` endpoint lists supported local presets and whether their model files are installed. `POST /speak` accepts text and a voice ID; only known voice IDs are resolved inside the local voice directory. The selected voice is saved to the agent’s voice setting in your workspace. Paste the generated token into the Local gateway security token field in the PIN&PITCH agent panel and select Unlock local AI. The token is kept in that browser tab session storage and cleared when the tab session ends.
 
 ### Local gateway security controls
 
@@ -99,7 +99,7 @@ Available endpoints:
 
 The first Whisper transcription downloads the selected model. Start with CPU transcription to avoid CUDA setup and GPU memory contention. For GPU transcription on Windows, faster-whisper requires compatible CUDA 12 cuBLAS and cuDNN 9 runtime libraries. If CUDA initialization fails, configure `WHISPER_DEVICE=cpu`. The gateway reports its actual Whisper device after initialization.
 
-The handover PC has an NVIDIA GeForce RTX 4050 Laptop GPU with approximately 6 GiB VRAM and 64 GiB system RAM. Qwen3 4B is the initial local model target; verify actual GPU offload and VRAM use with `nvidia-smi`. Whisper is deliberately configured for CPU by default so it does not compete with Ollama for the limited GPU memory.
+The handover PC has an NVIDIA GeForce RTX 4050 Laptop GPU with approximately 6 GiB VRAM and 64 GiB system RAM. Qwen2.5 3B is the initial local model target; verify actual GPU offload and VRAM use with `nvidia-smi`. Whisper is deliberately configured for CPU by default so it does not compete with Ollama for the limited GPU memory.
 
 ### Browser access notes
 
