@@ -30,6 +30,12 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 PIPER_MODEL = os.getenv("PIPER_MODEL", "")
 PIPER_VOICE_DIR = Path(os.getenv("PIPER_VOICE_DIR", str(Path.home() / ".local" / "share" / "piper" / "voices"))).expanduser()
 DEFAULT_PIPER_VOICE = os.getenv("PIPER_DEFAULT_VOICE", "en_US-amy-medium")
+
+PIPER_VOICE_CATALOG = {
+    "en_US-amy-medium": {"name": "Amy", "gender": "Female", "locale": "American English", "style": "Calm & premium"},
+    "en_US-kristin-medium": {"name": "Kristin", "gender": "Female", "locale": "American English", "style": "Friendly"},
+    "en_US-ryan-medium": {"name": "Ryan", "gender": "Male", "locale": "American English", "style": "Professional"},
+}
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
