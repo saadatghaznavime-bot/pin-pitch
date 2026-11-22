@@ -13,6 +13,8 @@ import subprocess
 import time
 from collections import defaultdict, deque
 import tempfile
+import io
+import wave
 from pathlib import Path
 from typing import Optional
 
@@ -59,6 +61,7 @@ app.add_middleware(
 )
 
 _whisper_model = None
+_piper_voices: dict[str, object] = {}
 _whisper_device_actual: Optional[str] = None
 _whisper_compute_actual: Optional[str] = None
 API_TOKEN = os.getenv("LOCAL_AI_API_TOKEN", "").strip()
@@ -247,6 +250,20 @@ def _piper_voice_path(voice_id: str) -> Optional[Path]:
     return None
 
 
+
+def _synthesize_piper_wav(text: str, voice_id: str, model_path: Path) -> bytes:
+    """Synthesize WAV directly through Piper's Python API; no unsigned CLI executable."""
+    voice = _piper_voices.get(voice_id)
+    if voice is None:
+        from piper import PiperVoice
+        voice = PiperVoice.load(str(model_path))
+        _piper_voices[voice_id] = voice
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        voice.synthesize_wav(text, wav_file)
+    return buffer.getvalue()
+
 def _piper_voice_status() -> list[dict]:
     return [{**details, "id": voice_id, "available": bool(_piper_voice_path(voice_id))} for voice_id, details in PIPER_VOICE_CATALOG.items()]
 
@@ -266,22 +283,17 @@ async def speak(payload: dict):
     if not model_path:
         raise HTTPException(503, "Piper voice is not installed. Install its .onnx and .onnx.json files in " + str(PIPER_VOICE_DIR) + ".")
     try:
-        with tempfile.TemporaryDirectory() as folder:
-            output_path = Path(folder) / "reply.wav"
-            process = await asyncio.create_subprocess_exec(
-                "piper", "--model", str(model_path), "--output_file", str(output_path),
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await asyncio.wait_for(process.communicate(text.encode("utf-8")), timeout=60)
-            if process.returncode != 0 or not output_path.is_file():
-                detail = stderr.decode("utf-8", "ignore")[-300:]
-                raise HTTPException(502, f"Piper synthesis failed: {detail or 'no audio returned'}")
-            audio_bytes = output_path.read_bytes()
+        audio_bytes = await asyncio.wait_for(
+            asyncio.to_thread(_synthesize_piper_wav, text, voice_id, model_path),
+            timeout=60,
+        )
         return Response(content=audio_bytes, media_type="audio/wav", headers={"X-PINPITCH-VOICE": voice_id, "Cache-Control": "no-store"})
-    except FileNotFoundError:
-        raise HTTPException(503, "Piper CLI was not found. Install requirements-local.txt.")
     except asyncio.TimeoutError:
         raise HTTPException(504, "Piper synthesis timed out.")
+    except ImportError:
+        raise HTTPException(503, "Piper Python package is not installed. Install requirements-local.txt.")
+    except Exception as exc:
+        raise HTTPException(502, f"Piper synthesis failed: {type(exc).__name__}: {str(exc)[:240]}")
 
 
 if __name__ == "__main__":
