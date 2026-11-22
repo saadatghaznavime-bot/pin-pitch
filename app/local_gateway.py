@@ -135,7 +135,7 @@ async def health():
         "network_scope": "loopback-only; do not expose publicly",
         "ollama": ollama,
         "whisper": {"installed": _whisper_model is not None, "configured_model": WHISPER_MODEL, "configured_device": WHISPER_DEVICE, "actual_device": _whisper_device_actual},
-        "piper": {"configured": bool(PIPER_MODEL and Path(PIPER_MODEL).is_file())},
+        "piper": {"configured": bool(_piper_voice_path(DEFAULT_PIPER_VOICE)), "default_voice": DEFAULT_PIPER_VOICE, "voices": _piper_voice_status()},
         "gpu": _gpu_info(),
     }
 
@@ -227,14 +227,38 @@ async def transcribe(audio: UploadFile = File(...)):
                 pass
 
 
+def _piper_voice_path(voice_id: str) -> Optional[Path]:
+    """Resolve only known voice IDs to local model files; never accept arbitrary paths."""
+    if voice_id not in PIPER_VOICE_CATALOG:
+        return None
+    candidate = PIPER_VOICE_DIR / (voice_id + ".onnx")
+    if candidate.is_file():
+        return candidate.resolve()
+    if voice_id == DEFAULT_PIPER_VOICE and PIPER_MODEL:
+        legacy = Path(PIPER_MODEL).expanduser()
+        if legacy.is_file() and legacy.name == voice_id + ".onnx":
+            return legacy.resolve()
+    return None
+
+
+def _piper_voice_status() -> list[dict]:
+    return [{**details, "id": voice_id, "available": bool(_piper_voice_path(voice_id))} for voice_id, details in PIPER_VOICE_CATALOG.items()]
+
+
+@app.get("/voices", dependencies=[Depends(_security_guard)])
+async def list_voices():
+    return {"default_voice": DEFAULT_PIPER_VOICE, "voices": _piper_voice_status(), "voice_directory": str(PIPER_VOICE_DIR)}
+
+
 @app.post("/speak", dependencies=[Depends(_security_guard)])
 async def speak(payload: dict):
     text = str(payload.get("text", "")).strip()
     if not text or len(text) > 4000:
         raise HTTPException(400, "Text must contain 1–4000 characters.")
-    model_path = Path(PIPER_MODEL).expanduser() if PIPER_MODEL else None
-    if not model_path or not model_path.is_file():
-        raise HTTPException(503, "Piper voice model is not configured. Set PIPER_MODEL to a local .onnx voice file.")
+    voice_id = str(payload.get("voice", DEFAULT_PIPER_VOICE))
+    model_path = _piper_voice_path(voice_id)
+    if not model_path:
+        raise HTTPException(503, "Piper voice is not installed. Install its .onnx and .onnx.json files in " + str(PIPER_VOICE_DIR) + ".")
     try:
         with tempfile.TemporaryDirectory() as folder:
             output_path = Path(folder) / "reply.wav"
@@ -247,7 +271,7 @@ async def speak(payload: dict):
                 detail = stderr.decode("utf-8", "ignore")[-300:]
                 raise HTTPException(502, f"Piper synthesis failed: {detail or 'no audio returned'}")
             audio_bytes = output_path.read_bytes()
-        return Response(content=audio_bytes, media_type="audio/wav", headers={"X-PINPITCH-VOICE": "piper-local"})
+        return Response(content=audio_bytes, media_type="audio/wav", headers={"X-PINPITCH-VOICE": voice_id, "Cache-Control": "no-store"})
     except FileNotFoundError:
         raise HTTPException(503, "Piper CLI was not found. Install requirements-local.txt.")
     except asyncio.TimeoutError:
