@@ -12,7 +12,10 @@
     </div>
     <p class="muted">Uses your local Ollama model, faster-whisper and Piper when installed. Conversations are saved in your PIN&PITCH workspace.</p>
     <label class="field"><span>Local gateway security token</span><input id="localGatewayToken" type="password" autocomplete="off" placeholder="Paste your LOCAL_AI_API_TOKEN"></label><button class="ghost" id="unlockLocalGateway" style="width:100%;margin-bottom:10px">Unlock local AI</button>
-    <label class="field"><span>Select agent</span><select id="talkAgent" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"></select></label><label class="field"><span>Saved conversations</span><select id="savedAgentSessions" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="">No saved conversations loaded</option></select></label><button class="ghost" id="loadSavedSession" style="width:100%;margin-bottom:8px">Load selected conversation</button>
+    <label class="field"><span>Select agent</span><select id="talkAgent" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"></select></label>
+    <label class="field"><span>Agent voice · local Piper</span><select id="talkVoice" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="en_US-amy-medium">Amy · Female · American · Calm & premium</option></select></label>
+    <button class="ghost" id="previewAgentVoice" style="width:100%;margin-bottom:10px">▶ Preview voice</button>
+    <p class="muted" id="voiceSetupNote" style="margin-top:-4px">Voice preview requires the local Piper voice model to be installed.</p><label class="field"><span>Saved conversations</span><select id="savedAgentSessions" style="width:100%;padding:12px;border:1px solid #ead8cc;border-radius:11px;background:white"><option value="">No saved conversations loaded</option></select></label><button class="ghost" id="loadSavedSession" style="width:100%;margin-bottom:8px">Load selected conversation</button>
     <div id="talkTranscript" style="min-height:64px;max-height:220px;overflow:auto;background:#fff6f0;border-radius:12px;padding:10px;font-size:12px;color:#555;margin:12px 0">Your saved conversation will appear here.</div>
     <label class="field"><span>Or type a message</span><input id="freeVoiceText" type="text" placeholder="Ask about hours, pricing, bookings…"></label>
     <div style="display:flex;gap:8px">
@@ -34,6 +37,11 @@
   $("localGatewayToken").value = gatewayToken;
   let agents = [], savedSessions = [], activeSessionId = null, activeAgentId = null, history = [];
   let mediaRecorder = null, mediaStream = null, audioChunks = [], listening = false;
+  let piperVoices = [];
+  const defaultVoice = "en_US-amy-medium";
+  const voiceByAgentKey = "pinpitch_agent_voices";
+  let agentVoices = {};
+  try { agentVoices = JSON.parse(localStorage.getItem(voiceByAgentKey) || "{}"); } catch { agentVoices = {}; }
 
   function log(who, text) {
     const box = $("talkTranscript");
@@ -55,6 +63,7 @@
       const whisper = health.whisper?.installed;
       const piper = health.piper?.configured;
       state(model ? "Local model ready" : "Local AI needs setup");
+      await loadPiperVoices();
       return { online: true, model, whisper, piper };
     } catch {
       state("FAQ fallback · gateway offline");
@@ -114,11 +123,66 @@
     return activeSessionId;
   }
 
+
+  function currentVoice() {
+    const agentId = String($("talkAgent").value || "");
+    return agentVoices[agentId] || defaultVoice;
+  }
+
+  async function loadPiperVoices() {
+    try {
+      const response = await fetch(GATEWAY + "/voices", { cache: "no-store", headers: gatewayHeaders() });
+      if (!response.ok) throw new Error("Voice list unavailable");
+      const data = await response.json();
+      piperVoices = data.voices || [];
+      const select = $("talkVoice");
+      const selected = currentVoice();
+      select.innerHTML = piperVoices.map(v => '<option value="' + escapeHtml(v.id) + '">' + escapeHtml(v.label) + (v.available ? "" : " · not installed") + '</option>').join("");
+      select.value = piperVoices.some(v => v.id === selected) ? selected : defaultVoice;
+      const active = piperVoices.find(v => v.id === select.value);
+      $("voiceSetupNote").textContent = active?.available ? "Ready · speech is generated locally on this PC." : "Install the selected Piper .onnx voice and matching .onnx.json file to enable local playback.";
+    } catch { $("voiceSetupNote").textContent = "Unlock the local gateway to load available Piper voices."; }
+  }
+
+  async function previewVoice() {
+    const voice = $("talkVoice").value || defaultVoice;
+    const chosen = piperVoices.find(item => item.id === voice);
+    if (chosen && !chosen.available) {
+      state("Voice model not installed");
+      $("voiceSetupNote").textContent = "This voice is selected, but its local model files are not installed yet.";
+      return;
+    }
+    const button = $("previewAgentVoice");
+    button.disabled = true;
+    state("Generating local voice preview…");
+    try {
+      const response = await fetch(GATEWAY + "/speak", {
+        method: "POST",
+        headers: gatewayHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ text: "Hello, welcome. Thank you for calling. How may I help you today?", voice: voice })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || "Piper voice preview failed.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      audio.onerror = () => URL.revokeObjectURL(url);
+      await audio.play();
+      state("Playing local Piper preview");
+    } catch (error) {
+      state("Voice preview unavailable");
+      $("voiceSetupNote").textContent = error.message;
+    } finally { button.disabled = false; }
+  }
+
   async function speak(text) {
     try {
       const response = await fetch(GATEWAY + "/speak", {
         method: "POST", headers: gatewayHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ text: text, voice: currentVoice() })
       });
       if (!response.ok) throw new Error("Piper not ready");
       const blob = await response.blob();
@@ -242,6 +306,13 @@
 
   $("unlockLocalGateway").addEventListener("click", async () => { gatewayToken = $("localGatewayToken").value.trim(); if (gatewayToken.length < 32) { state("Token must be at least 32 characters"); return; } sessionStorage.setItem(gatewayTokenKey, gatewayToken); await checkGateway(); });
   $("loadSavedSession").addEventListener("click", loadSelectedSession);
+  $("previewAgentVoice").addEventListener("click", previewVoice);
+  $("talkVoice").addEventListener("change", () => {
+    const agentId = String($("talkAgent").value || "");
+    if (agentId) { agentVoices[agentId] = $("talkVoice").value; localStorage.setItem(voiceByAgentKey, JSON.stringify(agentVoices)); }
+    const chosen = piperVoices.find(item => item.id === $("talkVoice").value);
+    $("voiceSetupNote").textContent = chosen?.available ? "Ready · speech is generated locally on this PC." : "Install this voice model locally before previewing.";
+  });
   $("talkStart").addEventListener("click", startRecording);
   $("talkStop").addEventListener("click", stopRecording);
   $("talkSend").addEventListener("click", () => {
@@ -257,6 +328,7 @@
   $("talkAgent").addEventListener("change", () => {
     activeSessionId = null; activeAgentId = null; history = [];
     $("talkTranscript").textContent = "Agent changed · a new saved conversation will start with your next message.";
+    $("talkVoice").value = currentVoice();
   });
   loadAgents();
   const originalRefresh = window.refreshAgents;
